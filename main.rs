@@ -197,7 +197,7 @@ fn parse_variable_expression(input: &str) -> IResult<&str, Expression> {
             input,
             Expression::Variable(variable.parse().unwrap()),
         ))
-    }
+}
 
 fn parse_macro_call(input: &str) -> IResult<&str, GCodeCommand> {
     let (input, letter) = char('#')(input)?;
