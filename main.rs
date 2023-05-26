@@ -1,8 +1,15 @@
+///These are active to enable program to compile during standalone development 
 #[allow(unused_imports)]
 #[allow(dead_code)]
 #[allow(unused_variables)]
 
-//use crate::ConditionalExpression;
+/*
+==================================================================================================================================
+          ///                        ///
+         ///         Crates         ///
+        ///                        ///
+==================================================================================================================================
+*/
 
 // Import HashMap Function for storing macro variable data
 use std::collections::HashMap;
@@ -18,18 +25,16 @@ use nom::{
     IResult,
 };
 
-#[derive(Debug)]
-struct GCodeProgram(Vec<GCodeCommand>);
+/*
+==================================================================================================================================
+          ///                            ///
+         ///         Structures         ///
+        ///                            ///
+==================================================================================================================================
+*/
 
 #[derive(Debug)]
-enum GCodeCommand {
-    GCommand(GCommand),
-    MCommand(MCommand),
-    IfStatement(IfStatement),
-    WhileLoop(WhileLoop),
-    VariableCall(VariableCall),
-    MacroCall(MacroCall),
-}
+struct GCodeProgram(Vec<GCodeCommand>);
 
 #[derive(Debug)]
 struct GCommand {
@@ -68,6 +73,24 @@ struct MacroCall {
     parameters: HashMap<char, ParameterValue>,
 }
 
+/*
+==================================================================================================================================
+          ///                             ///
+         ///         Enumerators         ///
+        ///                             ///
+==================================================================================================================================
+*/
+
+#[derive(Debug)]
+enum GCodeCommand {
+    GCommand(GCommand),
+    MCommand(MCommand),
+    IfStatement(IfStatement),
+    WhileLoop(WhileLoop),
+    VariableCall(VariableCall),
+    MacroCall(MacroCall),
+}
+
 #[derive(Debug)]
 enum Expression {
     Constant(f64),
@@ -91,6 +114,14 @@ enum ParameterValue {
     Variable(Expression),
 }
 
+/*
+==================================================================================================================================
+          ///                                 ///
+         ///         Program Parsing         ///
+        ///                                 ///
+==================================================================================================================================
+*/
+
 // Function to parse a parameter value
 fn parse_parameter_value(input: &str) -> IResult<&str, ParameterValue> {
     alt((
@@ -103,6 +134,15 @@ fn parse_g_code_program(input: &str) -> IResult<&str, GCodeProgram> {
     let (input, commands) = many0(parse_g_code_command)(input)?;
     Ok((input, GCodeProgram(commands)))
 }
+
+/*  
+=================================================================================================================================
+          ///                                              ///
+         ///         G-Code, Macro, and Variables         ///
+        ///                                              ///
+=================================================================================================================================
+*/
+
 // Function to parse a G-code command
 fn parse_g_code_command(input: &str) -> IResult<&str, GCodeCommand> {
     alt((
@@ -142,6 +182,54 @@ fn parse_m_command(input: &str) -> IResult<&str, GCodeCommand> {
     ))
 }
 
+fn parse_variable_call(input: &str) -> IResult<&str, GCodeCommand> {
+    let (input, _) = char('#')(input)?;
+    let (input, variable) = digit1(input)?;
+    Ok((input, GCodeCommand::VariableCall(VariableCall {
+        variable: variable.parse().unwrap(),
+    })))
+    }
+
+fn parse_variable_expression(input: &str) -> IResult<&str, Expression> {
+        let (input, _) = char('#')(input)?;
+        let (input, variable) = digit1(input)?;
+        Ok((
+            input,
+            Expression::Variable(variable.parse().unwrap()),
+        ))
+    }
+
+fn parse_macro_call(input: &str) -> IResult<&str, GCodeCommand> {
+    let (input, letter) = char('#')(input)?;
+    let (input, parameters) = many0(parse_parameter)(input)?;
+    Ok((
+        input,
+        GCodeCommand::MacroCall(MacroCall {
+            letter,
+            parameters: parameters.into_iter().collect(),
+        }),
+    ))
+}
+
+// Define a function to parse an individual G-code parameter (X, Y, Z, I, J)
+fn parse_parameter(input: &str) -> IResult<&str, (char, ParameterValue)> {
+    let (input, _) = multispace0(input)?;
+    let (input, parameter) = 
+        preceded(char(' '), alt((char('X'), char('Y'), char('Z'), char('I'), char('J'), char('K'), char('L'), char('T'), char('D'), char('S'), char('P'))))(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, value) = parse_parameter_value(input)?;
+    
+    Ok((input, (parameter, value)))
+}
+
+/*
+==================================================================================================================================
+          ///                                  ///
+         ///         Logic Statements         ///
+        ///                                  ///
+==================================================================================================================================
+*/
+
 fn parse_if_statement(input: &str) -> IResult<&str, GCodeCommand> {
     let (input, _) = tuple((tag("if"), multispace0))(input)?;
     let (input, condition) = parse_expression(input)?;
@@ -154,6 +242,7 @@ fn parse_if_statement(input: &str) -> IResult<&str, GCodeCommand> {
     let (input, else_commands) = opt(parse_else_commands)(input)?;
     let (input, _) = multispace0(input)?;
     let (input, _) = char('}')(input)?;
+    
     Ok((
         input,
         GCodeCommand::IfStatement(IfStatement {
@@ -175,6 +264,7 @@ fn parse_else_if_condition(input: &str) -> IResult<&str, (Expression, Vec<GCodeC
     let (input, commands) = many0(parse_g_code_command)(input)?;
     let (input, _) = multispace0(input)?;
     let (input, _) = char('}')(input)?;
+    
     Ok((input, (condition, commands)))
 }
 
@@ -184,8 +274,9 @@ fn parse_else_commands(input: &str) -> IResult<&str, Vec<GCodeCommand>> {
     let (input, commands) = many0(parse_g_code_command)(input)?;
     let (input, _) = multispace0(input)?;
     let (input, _) = char('}')(input)?;
+    
     Ok((input, commands))
-        }
+}
 
 fn parse_while_loop(input: &str) -> IResult<&str, GCodeCommand> {
     let (input, _) = tuple((tag("while"), multispace0))(input)?;
@@ -195,63 +286,13 @@ fn parse_while_loop(input: &str) -> IResult<&str, GCodeCommand> {
     let (input, commands) = many0(parse_g_code_command)(input)?;
     let (input, _) = multispace0(input)?;
     let (input, _) = char('}')(input)?;
+    
     Ok((
         input,
         GCodeCommand::WhileLoop(WhileLoop {
             condition,
             commands,
         }),
-    ))
-    }
-
-fn parse_variable_call(input: &str) -> IResult<&str, GCodeCommand> {
-    let (input, _) = char('#')(input)?;
-    let (input, variable) = digit1(input)?;
-    Ok((input, GCodeCommand::VariableCall(VariableCall {
-        variable: variable.parse().unwrap(),
-    })))
-    }
-
-fn parse_macro_call(input: &str) -> IResult<&str, GCodeCommand> {
-    let (input, letter) = char('#')(input)?;
-    let (input, parameters) = many0(parse_parameter)(input)?;
-    Ok((
-        input,
-        GCodeCommand::MacroCall(MacroCall {
-            letter,
-            parameters: parameters.into_iter().collect(),
-        }),
-    ))
-}
-
-fn parse_parameter(input: &str) -> IResult<&str, (char, ParameterValue)> {
-    let (input, _) = multispace0(input)?;
-    let (input, parameter) = preceded(char(':'), char_alphanumeric)(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, value) = parse_parameter_value(input)?;
-    Ok((input, (parameter, value)))
-}
-
-
-fn parse_expression(input: &str) -> IResult<&str, Expression> {
-    alt((
-        parse_constant_expression,
-        parse_variable_expression,
-        parse_binary_operation,
-    ))(input)
-}
-
-fn parse_constant_expression(input: &str) -> IResult<&str, Expression> {
-    let (input, constant) = parse_float(input)?;
-    Ok((input, Expression::Constant(constant)))
-}
-
-fn parse_variable_expression(input: &str) -> IResult<&str, Expression> {
-    let (input, _) = char('#')(input)?;
-    let (input, variable) = digit1(input)?;
-    Ok((
-        input,
-        Expression::Variable(variable.parse().unwrap()),
     ))
 }
 
@@ -268,7 +309,6 @@ fn parse_binary_operation(input: &str) -> IResult<&str, Expression> {
     let (input, _) = multispace0(input)?;
     let (input, right) = parse_expression(input)?;
     let (input, _) = char(')')(input)?;
-
     let operation = match operator {
         '+' => BinaryOperation::Add,
         '-' => BinaryOperation::Subtract,
@@ -276,22 +316,50 @@ fn parse_binary_operation(input: &str) -> IResult<&str, Expression> {
         '/' => BinaryOperation::Divide,
         _ => unreachable!(),
     };
-
+    
     Ok((input, Expression::BinaryOperation(operation(Box::new(left), Box::new(right)))))
-        }
+}
+
+/*
+==================================================================================================================================
+          ///                                           ///
+         ///         Operators and Expressions         ///
+        ///                                           ///
+==================================================================================================================================
+*/
+
+fn parse_expression(input: &str) -> IResult<&str, Expression> {
+    alt((
+        parse_constant_expression,
+        parse_variable_expression,
+        parse_binary_operation,
+    ))(input)
+}
+
+fn parse_constant_expression(input: &str) -> IResult<&str, Expression> {
+    let (input, constant) = parse_float(input)?;
+    Ok((input, Expression::Constant(constant)))
+}
 
 fn parse_float(input: &str) -> IResult<&str, f64> {
     let (input, number) = digit1(input)?;
     let (input, _) = opt(tuple((char('.'), digit1)))(input)?;
 
     Ok((input, number.parse().unwrap()))
-    }
+}
 
 fn char_alphanumeric(input: &str) -> IResult<&str, char> {
     let (input, char) = nom::character::complete::alphanumeric1(input)?;
     Ok((input, char.chars().next().unwrap()))
 }
 
+/*
+==================================================================================================================================
+          ///                      ///
+         ///         Main         ///
+        ///                      ///
+==================================================================================================================================
+*/
 fn main() {
     let input = r#"
         G1 X10 Y20 Z30
