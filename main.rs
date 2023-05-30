@@ -19,6 +19,7 @@
  *
  */
 
+
 ///These are active to enable program to compile during standalone development 
 #[allow(unused_imports)]
 #[allow(dead_code)]
@@ -32,27 +33,30 @@
 ==================================================================================================================================
 */
 
+/// Import Functions for Paralell Program Exection
 use std::sync::{Arc, Mutex};
-
+use rayon::prelude::*;
 use std::thread;
+
+/// Import Functions to Handle Trigonomic Functions
+use regex::Regex;
+use std::f64::consts::{PI, FRAC_PI_8};
 
 // Import HashMap Function for storing macro variable data
 use std::collections::HashMap;
 
-use rayon::prelude::*;
-
-// Import nom for data parsing
+// Import nom for data parsing, Removed 'sequence::{separate_list0, separate_list1}' error::{Error, ErrorKind},
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_until},
-    character::complete::{char, digit1, multispace0, multispace1},
-    character::complete::{alphanumeric1, char, digit1, multispace0},
-    combinator::{recognize, map, map_res, opt},
-    error::{Error, ErrorKind},
+    character::complete::{alphanumeric1, char, digit1, multispace0, multispace1},
+    combinator::{map_res, opt},
     multi::{many0, separated_list1},
-    sequence::{delimited, preceded, separated_list0, separated_list1, terminated, tuple},
+    error::{Error, ErrorKind},
+    sequence::{delimited, preceded},
     IResult,
 };
+
 
 /*
 ==================================================================================================================================
@@ -69,17 +73,17 @@ struct GCodeProgram {
 
 // Define a struct to hold the parsed G-code commands
 #[derive(Debug)]
-struct GCodeCommand {
+struct CommandLine { 
     line_number: String,
     command: String,
     arguments: HashMap<String, String>,
 }
-
+ 
 #[derive(Debug)]
-struct Command {
-    label: String,
+struct CommandString {
+    label: Option<String>,
     code: String,
-    arguments: Vec<Expression, Argument>,
+    arguments: Vec<Argument>,
 }
 
 #[derive(Debug)]
@@ -109,7 +113,7 @@ struct WhileLoop {
 
 #[derive(Debug)]
 struct VariableCall {
-    variable: usize,
+    variable: char,
 }
 
 #[derive(Debug)]
@@ -130,6 +134,7 @@ struct BinaryOperation {
     operator: BinaryOperator,
     right: Box<Expression>,
 }
+
 
 /*
 ==================================================================================================================================
@@ -159,7 +164,7 @@ enum Command {
     SetVariable(String, Expression),
     FunctionCall(Expression),
 }
-
+ 
 #[derive(Debug)]
 enum GCodeCommand {
     NCommand(String),
@@ -169,12 +174,6 @@ enum GCodeCommand {
     WhileLoop(WhileLoop),
     MacroCall(MacroCall),
     VariableAssignment(VariableAssignment),
-}
-
-#[derive(Debug)]
-enum Error<'a> {
-    ParseIntError(std::num::ParseFloatError),
-    UnknownFunction(&'a str),
 }
 
 #[derive(Debug)]
@@ -199,20 +198,106 @@ enum BinaryOperator {
 
 /*  
 =================================================================================================================================
-          ///                                    ///
-         ///         G-Codes and Macros         ///
-        ///                                    ///
+          ///                                      ///
+         ///         Concurrent Execution         ///
+        ///                                      ///
 =================================================================================================================================
 */
 
-// Function to parse and process G-code commands concurrently
-fn parse_and_process_gcode_concurrently(gcode: &[String]) {
-    // Create a shared mutable state to store the parsed commands
-    let parsed_commands: Arc<Mutex<Vec<GCodeCommand>>> = Arc::new(Mutex::new(Vec::new()));
+// Define the function type for parsed commands
+type ParsedCommandFn = dyn Fn(&str) -> Option<GCodeCommand> + Send + Sync + 'static;
 
+// Function to process a G-code line
+fn process_gcode_line(
+    line: String, 
+    output: Arc<Mutex<Vec<String>>>, 
+    commands: &[GCodeCommand], 
+    gcode: &[String], 
+    parsed_commands: Arc<Mutex<ParsedCommandFn>>,
+) {
+    // Pass the `commands` vector as an argument to the `process_gcode_line` function
+    process_gcode_line(line, output, &commands, &gcode, parsed_commands);
+
+    // Create a vector to hold the processed lines
+    let mut output = Vec::new();
+    //let mut output = output.lock().unwrap();
+    
+    // Create a regular expression object
+    let trig_regex = Regex::new(TRIG_PATTERN).unwrap();
+    //let trig_regex = Regex::new(r"(?i)[A-Z_]+(\s)*(\(.*?\))?").unwrap();
+    
+    // Search for trigonometric functions in the line
+    let matches: Vec<_> = trig_regex.find_iter(&line).collect();
+
+    if matches.is_empty() {
+        output.push(line);
+        return;
+    }
+
+    for mat in matches {
+        let parsed_commands_clone = Arc::clone(&parsed_commands);
+        let command_text = mat.as_str();
+        let command = parsed_commands_clone.lock().unwrap()(command_text);
+        let function = &line[mat.start()..mat.start() + 1];
+        let expression = mat.as_str();
+        
+        // Evaluate the trigonometric expression
+        if let Some(value) = evaluate_trig(expression) {
+            // Replace the expression in the G-code line with the evaluated value
+            let processed_line = line.replace(expression, &value.to_string());
+
+            // Push the processed line to the output vector
+            output.push(processed_line);
+        }
+
+        match command {
+            Some(GCodeCommand::NCommand(_)) => {
+                output.push(line);
+                return;
+            }
+            Some(GCodeCommand::MCommand(_)) => {
+                output.push(line);
+                return;
+            }
+            Some(GCodeCommand::GCommand(_)) => {
+                output.push(line);
+                return;
+            }
+            Some(GCodeCommand::IfStatement(_)) => {
+                output.push(line);
+                return;
+            }
+            Some(GCodeCommand::WhileLoop(_)) => {
+                output.push(line);
+                return;
+            }
+            Some(GCodeCommand::MacroCall(_)) => {
+                output.push(line);
+                return;
+            }
+            Some(GCodeCommand::VariableAssignment(_)) => {
+                output.push(line);
+                return;
+            }
+            None => {
+                output.push(line);
+                return;
+            }
+        }
+
+    }
+
+    let parsed_commands_clone = Arc::clone(&parsed_commands);
+
+    // Define a vector to hold the parsed commands
+    let commands: Vec<GCodeCommand> = Vec::new();
+
+    // Create a mutable reference to the function
+    let parsed_commands  = Arc::clone(&parsed_commands);
+    
     // Create a vector to hold the child threads
     let mut threads = vec![];
-
+    
     // Iterate over the G-code lines and spawn a thread for each line
     for line in gcode {
         // Clone the shared state for each thread
@@ -221,7 +306,7 @@ fn parse_and_process_gcode_concurrently(gcode: &[String]) {
         // Spawn a new thread to parse and process the command
         let thread = thread::spawn(move || {
             // Parse the command
-            let command = parse_command(line);
+            let command = parsed_commands_clone.lock().unwrap()(line);
 
             // Lock the parsed_commands mutex and add the command to the shared state
             let mut parsed_commands = parsed_commands_clone.lock().unwrap();
@@ -232,7 +317,7 @@ fn parse_and_process_gcode_concurrently(gcode: &[String]) {
 
         // Store the thread in the vector
         threads.push(thread);
-    }
+        }
 
     // Wait for all threads to complete
     for thread in threads {
@@ -242,502 +327,407 @@ fn parse_and_process_gcode_concurrently(gcode: &[String]) {
     // Retrieve the parsed commands from the shared state
     let parsed_commands = parsed_commands.lock().unwrap();
 
-    // Process the parsed commands concurrently
-    parsed_commands.par_iter().for_each(|command| {
+    // Process the parsed commands concurrently (Changed process_command to parse_command)
+    parsed_commands_clone.lock().unwrap().par_iter().for_each(|command| {
+    //parsed_commands.par_iter().for_each(|command| {
         process_command(command);
     });
-}
 
-// Function to parse a single G-code command
-fn parse_command(line: &str) -> Option<GCodeCommand> {
-    let tokens: Vec<&str> = line.split_whitespace().collect();
-
-    if tokens.is_empty() {
-        return None;
-    }
-
-    let line_number = tokens[0].to_string();
-    let command = tokens[1..].join(" ");
-
-    let mut arguments = HashMap::new();
-    for token in tokens[2..].iter() {
-        let parts: Vec<&str> = token.split('=').collect();
-        if parts.len() == 2 {
-            let key = parts[0].trim_start_matches('#').to_string();
-            let value = parts[1].to_string();
-            arguments.insert(key, value);
-        }
-    }
-
-    Some(GCodeCommand {
-        line_number,
-        command,
-        arguments,
-    })
-}
-
-// Function to parse a G-code command
-fn parse_g_code_command(input: &str) -> IResult<&str, GCodeCommand> {
-    alt((
-        parse_n_command,
-        parse_m_command,
-        parse_g_command,
-        parse_if_statement,
-        parse_while_loop,
-        parse_macro_call,
-        parse_variable_assignment,
-        parse_comment,
-    ))(input)
-}
-
-fn parse_g_code_program(input: &str) -> IResult<&str, GCodeProgram> {
-    let (input, _) = multispace0(input)?;
-    let (input, commands) = many0(parse_g_code_command)(input)?;
-    let (input, _) = multispace0(input)?;
-    Ok((input, GCodeProgram { commands }))
-}
-
-fn parse_g_command(input: &str) -> IResult<&str, GCodeCommand> {
-    let (input, _) = char('G')(input)?;
-    let (input, codes) = many1(char_digit)(input)?;
-    Ok((input, GCodeCommand::GCommand(GCommand { codes })))
-}
-
-fn parse_m_command(input: &str) -> IResult<&str, GCodeCommand> {
-    let (input, _) = char('M')(input)?;
-    let (input, code) = digit1(input)?;
-    let (input, parameters) = many0(parse_parameter)(input)?;
-    Ok((
-        input,
-        GCodeCommand::MCommand(MCommand {
-            code: format!("M{}", code),
-            parameters,
-        }),
-    ))
-}
-
-fn parse_macro_call(input: &str) -> IResult<&str, GCodeCommand> {
-    let (input, name) = alphanumeric1(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, parameters) = many0(parse_parameter)(input)?;
-    Ok((
-        input,
-        GCodeCommand::MacroCall(MacroCall { name: name.to_string(), parameters }),
-    ))
-}
-
-fn parse_n_command(input: &str) -> IResult<&str, GCodeCommand> {
-    let (input, _) = char('N')(input)?;
-    let (input, code) = digit1(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, comment) = opt(parse_comment)(input)?;
-    Ok((
-        input,
-        GCodeCommand::NCommand(format!("N{}{}", code, comment.unwrap_or(""))),
-    ))
-}
-
-fn parse_label(input: &str) -> IResult<&str, &str> {
-    let (input, _) = multispace0(input)?;
-    let (input, _) = tag("N")(input)?;
-    let (input, label) = take_until(" ")(input)?;
-    Ok((input, label))
-}
-
-fn parse_code_number(input: &str) -> IResult<&str, &str> {
-    let (input, _) = char('N')(input)?;
-    let (input, code) = take_until(" ")(input)?;
-    Ok((input, code))
-}
-
-fn parse_gcode(input: &str) -> Result<Vec<Command>, nom::Err<Error<&str>>> {
-    let (_, commands) = separated_list1(char('\n'), parse_code)(input)?;
-    Ok(commands)
+    // Push the original line to the output vector
+    output.push(line);
 }
 
 
 /*  
 =================================================================================================================================
-          ///                                                     ///
-         ///         Variables, Comments, and Parameters         ///
-        ///                                                     ///
+          ///                                    ///
+         ///         G-Codes and Macros         ///
+        ///                                    ///
 =================================================================================================================================
 */
 
-fn parse_variable(input: &str) -> IResult<&str, &str> {
-    let (input, _) = char('#')(input)?;
-    let (input, variable) = alphanumeric1(input)?;
-    Ok((input, variable))
-}
-fn parse_variable(input: &str) -> IResult<&str, Expression, Error> {
-    map(preceded(char('#'), digit1), |var_str: &str| {
-        Expression::Variable(var_str.into())
-    })(input)
-}
-
-fn parse_variable(input: &str) -> IResult<&str, Expression> {
-    let (input, variable) = char_alphabetic(input)?;
-    Ok((input, Expression::Variable(variable.to_string())))
-}
-
-fn parse_comment(input: &str) -> IResult<&str, &str> {
-    let (input, _) = char(' ')(input)?;
-    let (input, comment) = take_until("\n")(input)?;
-    Ok((input, comment))
-}
-
-fn parse_parameter(input: &str) -> IResult<&str, (char, f64)> {
-    let (input, _) = char(' ')(input)?;
-    let (input, param) = alphanumeric1(input)?;
-    let (input, _) = char('=')(input)?;
-    let (input, value) = parse_expression(input)?;
-    Ok((input, (param.chars().next().unwrap(), value)))
-}
-
-fn parse_macro_parameters(input: &str) -> IResult<&str, Vec<(char, f64)>> {
-    let (input, _) = char('(')(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, parameters) = separated_list1(
-        preceded(multispace0, char(',')),
-        preceded(multispace0, parse_parameter),
-    )(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, _) = char(')')(input)?;
-    Ok((input, parameters))
-}
-    
-fn parse_variable_assignment(input: &str) -> IResult<&str, GCodeCommand> {
-    let (input, variable) = char_digit(input)?;
-    let (input, _) = char('=')(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, value) = parse_float(input)?;
-    Ok((
-        input,
-        GCodeCommand::VariableAssignment(VariableAssignment { variable, value }),
-    ))
-}
-
-fn parse_parameter(input: &str) -> IResult<&str, (char, f64)> {
-    let (input, code) = char_alphabetic(input)?;
-    let (input, _) = char('=')(input)?;
-    let (input, value) = parse_float(input)?;
-    Ok((input, (code, value)))
-}
-
-
-/*
-==================================================================================================================================
-          ///                                           ///
-         ///         Operators and Expressions         ///
-        ///                                           ///
-==================================================================================================================================
-*/
-
-fn parse_expression(input: &str) -> IResult<&str, Expression> {
-    alt((
-        parse_number,
-        parse_variable,
-        parse_function_call,
-        parse_parenthesized_expression,
-    ))(input)
-}
-
-fn parse_number(input: &str) -> IResult<&str, Expression> {
-    let (input, number) = parse_float(input)?;
-    Ok((input, Expression::Number(number)))
-}
-
-fn parse_function_call(input: &str) -> IResult<&str, Expression> {
-    let (input, function) = char_alphabetic(input)?;
-    let (input, _) = char('(')(input)?;
-    let (input, arguments) = separated_list1(char(','), parse_expression)(input)?;
-    let (input, _) = char(')')(input)?;
-    Ok((input, Expression::FunctionCall(function.to_string(), arguments)))
-}
-fn parse_function_call(input: &str) -> IResult<&str, Expression, Error> {
-    let parse_arguments = delimited(
-        char('['),
-        separated_list1(char(','), parse_expression),
-        char(']'),
-    );
-
-    let parse_function = map(
-    tuple((
-        alt((char('['), char('('))),
-        multispace0,
-        digit1,
-        multispace0,
-        opt(parse_arguments),
-        multispace0,
-        alt((char(']'), char(')'))),
-    )),
-    |(_, _, func_name, _, args, _, _)| {
-        let function_name = match func_name {
-            "SIN" | "COS" | "TAN" | "ACOS" | "ATAN" | "SQRT" | "ABS" | "LN" | "EXP" | "ADP"
-            | "ROUND" | "FUP" | "FIX" | "BIN" | "BCD" => func_name.into(),
-            _ => return Err(Error::UnknownFunction(func_name)),
-        };
-
-        let arguments = args.unwrap_or_default();
-
-        Expression::FunctionCall(function_name, arguments)
-    },
-);
-
-parse_function(input)
-}
-
-fn parse_parenthesized_expression(input: &str) -> IResult<&str, Expression> {
-    delimited(char('('), parse_expression, char(')'))(input)
-}
-
-fn parse_variable_expression(input: &str) -> IResult<&str, Expression> {
-    let (input, variable) = parse_variable(input)?;
-    Ok((input, Expression::Variable(variable.chars().next().unwrap())))
-}
-
-fn parse_binary_operation_expression(input: &str) -> IResult<&str, Expression> {
-    let (input, left) = alt((parse_variable_expression, parse_constant_expression))(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, operator) = parse_binary_operator(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, right) = parse_expression(input)?;
-    Ok((
-        input,
-        Expression::BinaryOperation(Box::new(BinaryOperation {
-            left: Box::new(left),
-            operator,
-            right: Box::new(right),
-        })),
-    ))
-}
-
-
-/*
-==================================================================================================================================
-          ///                           ///
-         ///         Arguments         ///
-        ///                           ///
-==================================================================================================================================
-*/
-
-fn parse_argument(input: &str) -> IResult<&str, Argument> {
-    alt((
-        parse_float,
-        parse_label_argument,
-        parse_bracketed_command,
-        parse_bracketed_commands,
-        parse_math_function,
-        parse_control_function,
-        parse_expression,
-        parse_assignment,
-    ))(input)
-}
-
-fn parse_float(input: &str) -> IResult<&str, f64> {
-    let (input, sign) = opt(alt((char('+'), char('-'))))(input)?;
-    let (input, whole) = digit1(input)?;
-    let (input, fraction) = opt(preceded(char('.'), digit1))(input)?;
-    let number = format!("{}{}", sign.unwrap_or(""), whole);
-    if let Some(fraction) = fraction {
-        let number = format!("{}{}", number, fraction);
-        let number = number.parse::<f64>().unwrap();
-        Ok((input, number))
-        } else {
-            let number = number.parse::<f64>().unwrap();
-        Ok((input, number))
+// Function to parse a single G-code command
+fn parsed_commands(line: &str) -> Option<GCodeCommand> {
+    //let parsed_commands = parsed_commands_clone.lock().unwrap();
+    let result = command_line_parser(line);
+    if let Ok((_, command_line)) = result {
+        Some(parse_gcode_command(command_line))
+    } else {
+        None
     }
 }
 
-fn parse_label_argument(input: &str) -> IResult<&str, Argument> {
-    let (input, label) = parse_label(input)?;
-    Ok((input, Argument::Label(label.to_string())))
+fn process_command(command: &GCodeCommand) {
+    match command {
+        GCodeCommand::NCommand(number) => {
+            // Process N command
+            println!("N command: {}", number);
+        }
+        GCodeCommand::MCommand(m_command) => {
+            // Process M command
+            println!("M command: {:?}", m_command);
+        }
+        GCodeCommand::GCommand(g_command) => {
+            // Process G command
+            println!("G command: {:?}", g_command);
+        }
+        GCodeCommand::IfStatement(if_statement) => {
+            // Process if statement
+            println!("If statement: {:?}", if_statement);
+        }
+        GCodeCommand::WhileLoop(while_loop) => {
+            // Process while loop
+            println!("While loop: {:?}", while_loop);
+        }
+        GCodeCommand::MacroCall(macro_call) => {
+            // Process macro call
+            println!("Macro call: {:?}", macro_call);
+        }
+        GCodeCommand::VariableAssignment(variable_assignment) => {
+            // Process variable assignment
+            println!("Variable assignment: {:?}", variable_assignment);
+        }
+    }
 }
 
-fn parse_bracketed_command(input: &str) -> IResult<&str, Argument> {
-    let (input, command) = parse_bracketed_text(input)?;
-    Ok((input, Argument::BracketedCommand(command)))
+fn parse_gcode_command(command_line: CommandLine) -> GCodeCommand {
+    match command_line.command.as_str() {
+        "N" => GCodeCommand::NCommand(command_line.line_number),
+        "M" => GCodeCommand::MCommand(parse_m_command(command_line.arguments)),
+        "G" => GCodeCommand::GCommand(parse_g_command(command_line.arguments)),
+        "IF" => GCodeCommand::IfStatement(parse_if_statement(command_line.arguments)),
+        "WHILE" => GCodeCommand::WhileLoop(parse_while_loop(command_line.arguments)),
+        _ => GCodeCommand::MacroCall(parse_macro_call(
+            command_line.command,
+            command_line.arguments,
+        )),
+    }
 }
 
-fn parse_bracketed_commands(input: &str) -> IResult<&str, Argument> {
-    let (input, commands) = parse_bracketed_text(input)?;
-    let commands = commands
-        .split_whitespace()
-        .map(|command| command.to_string())
+fn parse_m_command(arguments: HashMap<String, String>) -> MCommand {
+    let code = arguments.get("M").unwrap().to_string();
+
+    let parameters: Vec<(char, f64)> = arguments
+        .into_iter()
+        .filter(|(key, _)| key.starts_with(char::is_alphabetic))
+        .filter_map(|(key, value)| {
+            let parameter = key.chars().next().unwrap();
+            let value = value.parse::<f64>().ok()?;
+            Some((parameter, value))
+        })
         .collect();
-    Ok((input, Argument::BracketedCommands(commands)))
+
+    MCommand { code, parameters }
 }
 
-fn parse_bracketed_text(input: &str) -> IResult<&str, &str> {
-    let (input, _) = char('[')(input)?;
-    let (input, text) = take_until("]")(input)?;
-    let (input, _) = char(']')(input)?;
-    Ok((input, text))
+fn parse_macro_call(name: String, arguments: HashMap<String, String>) -> MacroCall {
+    let parameters: Vec<(char, f64)> = arguments
+        .into_iter()
+        .filter(|(key, _)| key.starts_with(char::is_alphabetic))
+        .filter_map(|(key, value)| {
+            let parameter = key.chars().next().unwrap();
+            let value = value.parse::<f64>().ok()?;
+            Some((parameter, value))
+        })
+        .collect();
+
+    MacroCall { name, parameters }
 }
 
-fn parse_math_function(input: &str) -> IResult<&str, Argument> {
-    let (input, function) = parse_bracketed_text(input)?;
-    Ok((input, Argument::MathFunction(function)))
+fn parse_g_command(arguments: HashMap<String, String>) -> GCommand {
+    let codes = arguments
+        .get("G")
+        .unwrap_or(&"".to_string())
+        .chars()
+        .collect();
+ 
+    GCommand { codes }
 }
 
-fn parse_control_function(input: &str) -> IResult<&str, Argument> {
-    let (input, function) = parse_bracketed_text(input)?;
-    Ok((input, Argument::ControlFunction(function)))
+fn parse_command_letter(input: &str) -> IResult<&str, String> {
+    let (input, _) = multispace0(input)?;
+    let (input, _) = char('G')(input)?;
+    let (input, _) = multispace1(input)?;
+
+    Ok((input, "G".to_string()))
 }
 
-fn parse_expression(input: &str) -> IResult<&str, Argument> {
-    let (input, expression) = parse_bracketed_text(input)?;
-    Ok((input, Argument::Expression(expression)))
+
+/*  
+=================================================================================================================================
+          ///                                 ///
+         ///         Logic and Loops         ///
+        ///                                 ///
+=================================================================================================================================
+*/
+
+fn parse_if_statement(arguments: HashMap<String, String>) -> IfStatement {
+    let condition_str = arguments.get("CONDITION").unwrap();
+    
+    let condition = parse_expression(condition_str);
+
+    let mut commands = Vec::new();
+    let mut else_if_conditions = Vec::new();
+    let mut else_commands = None;
+
+    for (key, value) in arguments {
+        match key.as_str() {
+            "THEN" => commands = parse_gcode_block(&value),
+            "ELSE_IF" => {
+                let else_if_condition = parse_expression(&value);
+                let else_if_commands = parse_gcode_block(&value);
+                else_if_conditions.push((else_if_condition, else_if_commands));
+            }
+            "ELSE" => else_commands = Some(parse_gcode_block(&value)),
+            _ => (),
+        }
+    }
+
+    IfStatement {
+        condition,
+        commands,
+        else_if_conditions,
+        else_commands,
+    }
 }
 
-fn parse_assignment(input: &str) -> IResult<&str, Argument> {
-    let (input, assignment) = parse_bracketed_text(input)?;
-    Ok((input, Argument::Assignment(assignment)))
+fn parse_while_loop(arguments: HashMap<String, String>) -> WhileLoop {
+    let condition_str = arguments.get("CONDITION").unwrap();
+
+    let condition = parse_expression(condition_str);
+
+    let commands = parse_gcode_block(arguments.get("DO").unwrap());
+
+    WhileLoop { condition, commands }
 }
 
-fn parse_binary_operator(input: &str) -> IResult<&str, BinaryOperator> {
+
+/*  
+=================================================================================================================================
+          ///                              ///
+         ///         Expressions          ///
+        ///                              ///
+=================================================================================================================================
+*/
+
+fn parse_expression(expression: &str) -> Expression {
+    match expression_parser(expression) {
+        Ok((_, parsed_expression)) => parsed_expression,
+        Err(_) => Expression::Constant(0.0), // Default to 0.0 if parsing fails
+    }
+}
+
+fn parse_gcode_block(block: &str) -> Vec<GCodeCommand> {
+    let commands: Vec<GCodeCommand> = block
+        .split('\n')
+        .filter_map(|line| parsed_commands(line))
+        .collect();
+
+    commands
+}
+
+fn expression_parser(input: &str) -> IResult<&str, Expression> {
+    preceded(
+        multispace0,
+        alt((
+            constant_expression_parser,
+            program_variable_expression_parser,
+            variable_expression_parser,
+            function_call_expression_parser,
+            binary_operation_parser,
+        )),
+    )(input)
+}
+
+fn constant_expression_parser(input: &str) -> IResult<&str, Expression> {
+    map_res(digit1, |digits: &str| {
+        digits.parse::<f64>()
+            .map(Expression::Constant)
+            .map_err(|_| Error::from_error_kind(digits, ErrorKind::Digit))
+    })(input)
+}
+
+fn program_variable_expression_parser(input: &str) -> IResult<&str, Expression> {
+    map_res(
+        delimited(char('#'), digit1, char('.').or(char('E')).or(char('e'))),
+        |digits: &str| {
+            digits.parse::<f64>()
+                .map(Expression::Number)
+                .map_err(|_| Error::from_error_kind(digits, ErrorKind::Digit))
+        },
+    )(input)
+}
+
+fn variable_expression_parser(input: &str) -> IResult<&str, Expression> {
+    map_res(alphanumeric1, |var: &str| {
+        var.chars()
+            .next()
+            .map(Expression::Variable)
+            .ok_or(Error::from_error_kind(var, ErrorKind::AlphaNumeric))
+    })(input)
+}
+
+fn function_call_expression_parser(input: &str) -> IResult<&str, Expression> {
+    map_res(
+        separated_list1(
+            multispace1,
+            alt((
+                map_res(alphanumeric1, |s: &str| {
+                    s.parse::<f64>().map(Expression::Constant)
+                }),
+                map_res(alphanumeric1, |s: &str| {
+                    Ok(Expression::FunctionCall(s.to_string(), vec![]))
+                }),
+            )),
+        ),
+        |expressions: Vec<Expression>| {
+            let mut iter = expressions.into_iter();
+            let function_name = match iter.next() {
+                Some(Expression::FunctionCall(name, _)) => name,
+                Some(Expression::Constant(constant)) => {
+                    return Ok(Expression::Constant(constant));
+                }
+                Some(_) => return Err(Error::from_error_kind(input, ErrorKind::AlphaNumeric)),
+                None => return Err(Error::from_error_kind(input, ErrorKind::AlphaNumeric)),
+            };
+            let arguments = iter.collect();
+            Ok(Expression::FunctionCall(function_name, arguments))
+        },
+    )(input)
+}
+
+
+/*  
+=================================================================================================================================
+          ///                           ///
+         ///         Operators         ///
+        ///                           ///
+=================================================================================================================================
+*/
+
+fn binary_operation_parser(input: &str) -> IResult<&str, Expression> {
+    let (input, left) = expression_parser(input)?;
+
     let (input, operator) = alt((
-        map(char('+'), |_| BinaryOperator::Add),
-        map(char('-'), |_| BinaryOperator::Subtract),
-        map(char('*'), |_| BinaryOperator::Multiply),
-        map(char('/'), |_| BinaryOperator::Divide),
+        map_res(tag("+"), |_| Ok(BinaryOperator::Add)),
+        map_res(tag("-"), |_| Ok(BinaryOperator::Subtract)),
+        map_res(tag("*"), |_| Ok(BinaryOperator::Multiply)),
+        map_res(tag("/"), |_| Ok(BinaryOperator::Divide)),
     ))(input)?;
-    Ok((input, operator))
+
+    let (input, right) = expression_parser(input)?;
+
+    let binary_operation = BinaryOperation {
+        left: Box::new(left),
+        operator,
+        right: Box::new(right),
+    };
+
+    Ok((input, Expression::BinaryOperation(Box::new(binary_operation))))
 }
 
-fn char_digit(input: &str) -> IResult<&str, char> {
-    let (input, digit) = digit1(input)?;
-    let digit = digit.chars().next().unwrap();
-    Ok((input, digit))
+fn command_line_parser(input: &str) -> IResult<&str, CommandLine> {
+    let (input, line_number) = parse_line_number(input)?;
+    let (input, command) = parse_command_letter(input)?;
+    let (input, arguments) = parse_arguments(input)?;
+
+    let command_line = CommandLine {
+        line_number,
+        command,
+        arguments,
+    };
+
+    Ok((input, command_line))
 }
 
-fn char_alphabetic(input: &str) -> IResult<&str, char> {
-    let (input, alphabetic) = alphanumeric1(input)?;
-    let alphabetic = alphabetic.chars().next().unwrap();
-    Ok((input, alphabetic))
+fn parse_line_number(input: &str) -> IResult<&str, String> {
+    let (input, _) = multispace0(input)?;
+    let (input, line_number) = map_res(digit1, |digits: &str| {
+        Ok(digits.to_string())
+    })(input)?;
+    let (input, _) = multispace0(input)?;
+
+    Ok((input, line_number))
 }
 
-fn parse_float(input: &str) -> IResult<&str, Argument> {
-    let (input, float_val) = recognize_float(input)?;
-    let float_val = float_val.parse::<f64>().unwrap();
-    Ok((input, Argument::Float(float_val)))
+
+/*  
+=================================================================================================================================
+          ///                           ///
+         ///         Arguments         ///
+        ///                           ///
+=================================================================================================================================
+*/
+
+fn parse_arguments(input: &str) -> IResult<&str, HashMap<String, String>> {
+    let (input, _) = multispace0(input)?;
+    let (input, argument_list) = many0(parse_argument)(input)?;
+    let (input, _) = multispace0(input)?;
+
+    let arguments: HashMap<String, String> = argument_list.into_iter().collect();
+
+    Ok((input, arguments))
 }
 
-fn recognize_float(input: &str) -> IResult<&str, &str> {
-    recognize_float_inner(input).map_err(|_: nom::Err<nom::error::Error<&str>>| {
-        nom::Err::Error(Error::new(input, ErrorKind::Float))
-    })
+fn parse_argument(input: &str) -> IResult<&str, (String, String)> {
+    let (input, _) = multispace0(input)?;
+    let (input, name) = parse_argument_name(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, _) = char(':')(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, value) = parse_argument_value(input)?;
+    let (input, _) = multispace0(input)?;
+
+    Ok((input, (name, value)))
 }
 
-fn recognize_float_inner(input: &str) -> IResult<&str, &str> {
-    recognize_float_prefix(input)
-        .and_then(|(i, _)| recognize_float_suffix(i).map(|(i, _)| (i, ())))
-        .map(|(i, _)| (i, input))
+fn parse_argument_name(input: &str) -> IResult<&str, String> {
+    let (input, _) = multispace0(input)?;
+    let (input, name) = alphanumeric1(input)?;
+    let (input, _) = multispace0(input)?;
+
+    Ok((input, name.to_string()))
 }
 
-fn recognize_float_prefix(input: &str) -> IResult<&str, &str> {
-    alt((
-        recognize_float_integer_prefix,
-        recognize_float_decimal_prefix,
-    ))(input)
-}
+fn parse_argument_value(input: &str) -> IResult<&str, String> {
+    let (input, _) = multispace0(input)?;
+    let (input, value) = alt((
+        delimited(char('"'), take_until("\""), char('"')),
+        map_res(alphanumeric1, |s: &str| Ok(s.to_string())),
+    ))(input)?;
+    let (input, _) = multispace0(input)?;
 
-fn recognize_float_integer_prefix(input: &str) -> IResult<&str, &str> {
-    recognize_float_digits(input)
-        .and_then(|(i, _)| recognize_float_integer_exponent(i).map(|(i, _)| (i, ())))
-}
-
-fn recognize_float_integer_exponent(input: &str) -> IResult<&str, &str> {
-    recognize_float_exponent_prefix(input)
-        .and_then(|(i, _)| recognize_float_exponent_digits(i).map(|(i, _)| (i, ())))
-}
-
-fn recognize_float_decimal_prefix(input: &str) -> IResult<&str, &str> {
-    recognize_float_digits(input).and_then(|(i, _)| recognize_float_decimal_suffix(i))
-}
-
-fn recognize_float_decimal_suffix(input: &str) -> IResult<&str, &str> {
-    recognize_float_exponent_prefix(input)
-        .and_then(|(i, _)| recognize_float_decimal_digits(i).map(|(i, _)| (i, ())))
-}
-
-fn recognize_float_exponent_prefix(input: &str) -> IResult<&str, &str> {
-    alt((tag("e"), tag("E")))(input)
-}
-
-fn recognize_float_digits(input: &str) -> IResult<&str, &str> {
-    take_while1(|c: char| c.is_ascii_digit())(input)
-}
-
-fn recognize_float_decimal_digits(input: &str) -> IResult<&str, &str> {
-    take_while(|c: char| c.is_ascii_digit())(input)
-}
-
-fn recognize_float_exponent_digits(input: &str) -> IResult<&str, &str> {
-    recognize_float_sign(input)
-        .and_then(|(i, _)| recognize_float_digits(i))
-        .or(recognize_float_digits)(input)
-}
-
-fn recognize_float_sign(input: &str) -> IResult<&str, &str> {
-    alt((tag("+"), tag("-")))(input)
+    Ok((input, value.to_string()))
 }
 
 
 /*
 ==================================================================================================================================
-          ///                       ///
-         ///         Loops         ///
-        ///                       ///
+          ///                                        ///
+         ///         Trigonomic Expressions         ///
+        ///                                        ///
 ==================================================================================================================================
 */
 
-fn parse_if_statement(input: &str) -> IResult<&str, GCodeCommand> {
-    let (input, _) = tag("IF")(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, condition) = parse_expression(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, _) = tag("THEN")(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, commands) = many0(parse_g_code_command)(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, else_if_conditions) =
-        many0(preceded(parse_else_if_condition, parse_g_code_command))(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, else_commands) = opt(preceded(tag("ELSE"), many0(parse_g_code_command)))(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, _) = tag("ENDIF")(input)?;
-    Ok((
-        input,
-        GCodeCommand::IfStatement(IfStatement {
-            condition,
-            commands,
-            else_if_conditions,
-            else_commands,
-        }),
-    ))
-}
+// Regular expression pattern to match trigonometric functions in G-code
+const TRIG_PATTERN: &str = r"([A-Z])(.*?)(\[[A-Za-z]+\(.+?\).*?\])";
 
-fn parse_else_if_condition(input: &str) -> IResult<&str, Expression> {
-    let (input, _) = tag("ELSEIF")(input)?;
-    let (input, _) = multispace0(input)?;
-    parse_expression(input)
-}
+// Function to evaluate trigonometric expressions
+fn evaluate_trig(expression: &str) -> Option<f64> {
+    // Remove the square brackets and extract the function and argument
+    let expression = expression.trim_matches(|c| c == '[' || c == ']');
+    let parts: Vec<&str> = expression.split('(').collect();
+    let function = parts.get(0)?;
+    let argument = parts.get(1)?;
 
-fn parse_while_loop(input: &str) -> IResult<&str, GCodeCommand> {
-    let (input, _) = tag("WHILE")(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, condition) = parse_expression(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, _) = tag("DO")(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, commands) = many0(parse_g_code_command)(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, _) = tag("ENDWHILE")(input)?;
-    Ok((
-        input,
-        GCodeCommand::WhileLoop(WhileLoop { condition, commands }),
-    ))
+    // Extract the value within the parentheses and evaluate the trigonometric function
+    let value = argument[..argument.len() - 1].parse::<f64>().ok()?;
+    match function {
+        &"SIN" => Some((value * FRAC_PI_8).sin()),
+        &"COS" => Some((value * FRAC_PI_8).cos()),
+        &"TAN" => Some((value * FRAC_PI_8).tan()),
+        _ => None,
+    }
 }
 
 
@@ -751,65 +741,82 @@ fn parse_while_loop(input: &str) -> IResult<&str, GCodeCommand> {
 
 fn main() {
     // Example G-code
-    let gcode = vec![
-        "N000 O0001 (This is a comment on code)",
-        "N001 M06 T1",
-        "N002 G0 G20 G54 X2.00 Y2.00 Z4.00",
-        "N003 G01 G43 F20.0 Z-5.00 H01 M08",
-        "N004 M106 S255",
-        "N005 IF #1 > 0 GOTO N012",
-        "N006 ELSE IF #2 == 0 THEN [G1 X50 Y60 Z70]",
-        "N007 ELSE [G1 X70 Y80 Z90]",
-        "N008 [G1 X10 Y20 Z30 #3 = #3 + 1]",
-        "N009 M98 P0100",
-        "N010 #1000=100 #2000=X20.45 #3000=Y456.908 #4000=Z345.875",
-        "N011 G0 X#1000 Y#2000 Z#3000",
-        "N012 IF [#100 == 0] THEN #100 = 1 (Avoid dividing by zero!)",
-        "N013 IF [#100 <= 0] THEN #100 = 10",
-        "N014 ELSE [#100 >= 0] THEN #100 = -10",
-        "N015 WHILE [#3 == 10] DO1",
-        "N016 IF [#100 EQ 0] THEN #100 = 1 (Avoid dividing by zero!)",
-        "N017 IF [#100 GT 0] THEN #100 = 10",
-        "N018 IF [#100 LT 0] THEN #100 = -10",
-        "N019 ELSE #100=0",
-        "N020 END1",
-        "N021 #1=SIN[#2]",
-        "N022 #1=COS[#3]",
-        "N023 #1=TAN[#4]",
-        "N024 #1=ACOS[#5]",
-        "N025 #1=ATAN[#6]/[#7]",
-        "N026 #1=SQRT=[#8]",
-        "N027 #1=ABS[#9]",
-        "N028 #1=LN[#10]",
-        "N029 #1=EXP[#11] (Exponent base e)",
-        "N030 #1=ADP[#12] (Add a decimal point to the end of the number)",
-        "N031 #1=ROUND[#13]",
-        "N032 #1=FUP[#14]",
-        "N033 #1=FIX[#15]",
-        "N034 #1=BIN[#16] (Convert from BCD to binary)",
-        "N035 #1=BCD[#17] (Convert from binary to BCD)",
-        "N036 DPRNT [OUTPUT*TIME:**#3000[60]]",
-        "N037 M30",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect::<Vec<String>>();
+    let gcode = Arc::new(Mutex::new(String::from(
+        "
+        N000 O0001 (This is a comment on code)
+        N001 M06 T1
+        N002 G0 G20 G54 X2.00 Y2.00 Z4.00
+        N003 G01 G43 F20.0 Z-5.00 H01 M08
+        N004 M106 S255
+        N005 IF #1 > 0 GOTO N012
+        N006 ELSE IF #2 == 0 THEN [G1 X50 Y60 Z70]
+        N007 ELSE [G1 X70 Y80 Z90]
+        N008 [G1 X10 Y20 Z30 #3 = #3 + 1]
+        N009 M98 P0100
+        N010 #1000=100 #2000=X20.45 #3000=Y456.908 #4000=Z345.875
+        N011 G0 X#1000 Y#2000 Z#3000
+        N012 IF [#100 == 0] THEN #100 = 1 (Avoid dividing by zero!)
+        N013 IF [#100 <= 0] THEN #100 = 10
+        N014 ELSE [#100 >= 0] THEN #100 = -10
+        N015 WHILE [#3 == 10] DO1
+        N016 IF [#100 EQ 0] THEN #100 = 1 (Avoid dividing by zero!)
+        N017 IF [#100 GT 0] THEN #100 = 10
+        N018 IF [#100 LT 0] THEN #100 = -10
+        N019 ELSE #100=0
+        N020 END1
+        N021 #1=SIN[#2]
+        N022 #1=COS[#3]
+        N023 #1=TAN[#4]
+        N024 #1=ACOS[#5]
+        N025 #1=ATAN[#6]/[#7]
+        N026 #1=SQRT=[#8]
+        N027 #1=ABS[#9]
+        N028 #1=LN[#10]
+        N029 #1=EXP[#11] (Exponent base e)
+        N030 #1=ADP[#12] (Add a decimal point to the end of the number)
+        N031 #1=ROUND[#13]
+        N032 #1=FUP[#14]
+        N033 #1=FIX[#15]
+        N034 #1=BIN[#16] (Convert from BCD to binary)
+        N035 #1=BCD[#17] (Convert from binary to BCD)
+        N036 DPRNT [OUTPUT*TIME:**#3000[60]]
+        N037 M30
+        ",
+    )));
 
-    parse_and_process_gcode_concurrently(&gcode);
+    let parsed_commands: Arc<Mutex<ParsedCommandFn>> = Arc:new(Mutex::new(Box::new(parsed_commands)));
 
+    // Vector to store the processed G-code lines
+    let output = Arc::new(Mutex::new(Vec::new()));
 
-    match parse_g_code_program(code) {
-        Ok((_, program)) => println!("{:#?}", program),
-        Err(err) => println!("Parsing Error: {:?}", err),
-    }
-}
-
-let commands: Vec<Command> = gcode
-        .lines()
-        .filter_map(|line| parse_code(line).ok().map(|(_, command)| command))
+    // Split the G-code into individual lines
+    let lines: Vec<String> = gcode
+        .lock()
+        .unwrap()
+        .trim()
+        .split('\n')
+        .map(|line| String::from(line.trim()))
         .collect();
 
-    for command in commands {
-        println!("{:?}", command);
+    // Process the G-code lines in parallel using multiple threads
+    let handles: Vec<_> = lines
+        .into_iter()
+        .map(|line| {
+            let gcode = Arc::clone(&gcode);
+            let output = Arc::clone(&output);
+            thread::spawn(move || process_gcode_line(line:, output:, commands:, gcode:, parsed_commands:,))
+        })
+        .collect();
+
+    // Wait for all threads to finish
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    // Print the processed G-code lines
+    let output = output.lock().unwrap();
+    for line in &*output {
+        println!("{}", line);
     }
 }
+
