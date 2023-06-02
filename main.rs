@@ -1,5 +1,5 @@
 /*
- * Rust GCode Parser
+ * Rust GCode Parser and Interpreter
  * Copyright (c) 2023 Rust-GCode-Parser [https://github.com/MasterofNull/Rust-GCode-Parser]
  *
  * Copyright (c) 2023 Carlon LaMont
@@ -20,10 +20,13 @@
  */
 
 
+
+//use core::num::dec2flt::number::Number;
 ///These are active to enable program to compile during standalone development 
 #[allow(unused_imports)]
 #[allow(dead_code)]
 #[allow(unused_variables)]
+
 
 /*
 ==================================================================================================================================
@@ -33,107 +36,7 @@
 ==================================================================================================================================
 */
 
-/// Import Functions for Paralell Program Exection
-use std::sync::{Arc, Mutex};
-use rayon::prelude::*;
-use std::thread;
-
-/// Import Functions to Handle Trigonomic Functions
 use regex::Regex;
-use std::f64::consts::{PI, FRAC_PI_8};
-
-// Import HashMap Function for storing macro variable data
-use std::collections::HashMap;
-
-// Import nom for data parsing, Removed 'sequence::{separate_list0, separate_list1}' error::{Error, ErrorKind},
-use nom::{
-    branch::alt,
-    bytes::complete::{tag, take_until},
-    character::complete::{alphanumeric1, char, digit1, multispace0, multispace1},
-    combinator::{map_res, opt},
-    multi::{many0, separated_list1},
-    error::{Error, ErrorKind},
-    sequence::{delimited, preceded},
-    IResult,
-};
-
-
-/*
-==================================================================================================================================
-          ///                            ///
-         ///         Structures         ///
-        ///                            ///
-==================================================================================================================================
-*/
-
-#[derive(Debug)]
-struct GCodeProgram {
-    commands: Vec<GCodeCommand>,
-}
-
-// Define a struct to hold the parsed G-code commands
-#[derive(Debug)]
-struct CommandLine { 
-    line_number: String,
-    command: String,
-    arguments: HashMap<String, String>,
-}
- 
-#[derive(Debug)]
-struct CommandString {
-    label: Option<String>,
-    code: String,
-    arguments: Vec<Argument>,
-}
-
-#[derive(Debug)]
-struct MCommand {
-    code: String,
-    parameters: Vec<(char, f64)>,
-}
-
-#[derive(Debug)]
-struct GCommand {
-    codes: Vec<char>,
-}
-
-#[derive(Debug)]
-struct IfStatement {
-    condition: Expression,
-    commands: Vec<GCodeCommand>,
-    else_if_conditions: Vec<(Expression, Vec<GCodeCommand>)>,
-    else_commands: Option<Vec<GCodeCommand>>,
-}
-
-#[derive(Debug)]
-struct WhileLoop {
-    condition: Expression,
-    commands: Vec<GCodeCommand>,
-}
-
-#[derive(Debug)]
-struct VariableCall {
-    variable: char,
-}
-
-#[derive(Debug)]
-struct MacroCall {
-    name: String,
-    parameters: Vec<(char, f64)>,
-}
-
-#[derive(Debug)]
-struct VariableAssignment {
-    variable: char,
-    value: f64,
-}
-
-#[derive(Debug)]
-struct BinaryOperation {
-    left: Box<Expression>,
-    operator: BinaryOperator,
-    right: Box<Expression>,
-}
 
 
 /*
@@ -145,47 +48,23 @@ struct BinaryOperation {
 */
 
 #[derive(Debug)]
-enum Expression {
-    Constant(f64),
-    Number(f64),
-    Variable(char),
-    FunctionCall(String, Vec<Expression>),
-    BinaryOperation(Box<BinaryOperation>),
-}
-
-#[derive(Debug)]
 enum Command {
-    Comment(String),
     GCode(String),
-    If(Expression, String),
-    ElseIf(Expression, String),
-    Else(String),
-    While(Expression, String),
-    SetVariable(String, Expression),
-    FunctionCall(Expression),
-}
- 
-#[derive(Debug)]
-enum GCodeCommand {
-    NCommand(String),
-    MCommand(MCommand),
-    GCommand(GCommand),
-    IfStatement(IfStatement),
-    WhileLoop(WhileLoop),
-    MacroCall(MacroCall),
-    VariableAssignment(VariableAssignment),
+    MCode(String),
+    TCode(String),
+    FCode(String),
+    SCode(String),
+    IfStatement(String),
+    WhileLoop(String),
+    Default,
 }
 
 #[derive(Debug)]
-enum Argument {
-    Float(f64),
-    Label(String),
-    BracketedCommand(String),
-    BracketedCommands(Vec<String>),
-    MathFunction(String),
-    ControlFunction(String),
-    Expression(String),
-    Assignment(String),
+enum Expression {
+    Constant(i32),
+    Variable(String),
+    BinaryOperation(Box<BinaryOperation>),
+    TrigonometricOperation(Box<TrigonometricOperation>),
 }
 
 #[derive(Debug)]
@@ -196,554 +75,351 @@ enum BinaryOperator {
     Divide,
 }
 
-/*  
-=================================================================================================================================
-          ///                                      ///
-         ///         Concurrent Execution         ///
-        ///                                      ///
-=================================================================================================================================
+#[derive(Debug)]
+enum TrigonometricFunction {
+    Sin,
+    Cos,
+    Tan,
+    Acos,
+    Atan,
+    Sqrt,
+    Abs,
+    Ln,
+    Exp,
+    Adp,
+    Round,
+    Fup,
+    Fix,
+    Bin,
+    Bcd,
+}
+
+
+/*
+==================================================================================================================================
+          ///                            ///
+         ///         Structures         ///
+        ///                            ///
+==================================================================================================================================
 */
 
-// Define the function type for parsed commands
-type ParsedCommandFn = dyn Fn(&str) -> Option<GCodeCommand> + Send + Sync + 'static;
+#[derive(Debug)]
+struct IfStatement {
+    condition: Expression,
+    line_commands: Vec<String>,
+    else_if_conditions: Vec<(Expression, Vec<String>)>,
+    else_commands: Option<Vec<String>>,
+}
 
-// Function to process a G-code line
-fn process_gcode_line(
-    line: String, 
-    output: Arc<Mutex<Vec<String>>>, 
-    commands: &[GCodeCommand], 
-    gcode: &[String], 
-    parsed_commands: Arc<Mutex<ParsedCommandFn>>,
-) {
-    // Pass the `commands` vector as an argument to the `process_gcode_line` function
-    process_gcode_line(line, output, &commands, &gcode, parsed_commands);
+#[derive(Debug)]
+struct WhileLoop {
+    condition: Expression,
+    line_commands: Vec<String>,
+}
 
-    // Create a vector to hold the processed lines
-    let mut output = Vec::new();
-    //let mut output = output.lock().unwrap();
-    
-    // Create a regular expression object
-    let trig_regex = Regex::new(TRIG_PATTERN).unwrap();
-    //let trig_regex = Regex::new(r"(?i)[A-Z_]+(\s)*(\(.*?\))?").unwrap();
-    
-    // Search for trigonometric functions in the line
-    let matches: Vec<_> = trig_regex.find_iter(&line).collect();
+#[derive(Debug)]
+struct BinaryOperation {
+    left: Box<Expression>,
+    operator: BinaryOperator,
+    right: Box<Expression>,
+}
 
-    if matches.is_empty() {
-        output.push(line);
-        return;
+#[derive(Debug)]
+struct TrigonometricOperation {
+    function: TrigonometricFunction,
+    argument: Box<Expression>,
+}
+
+struct ExecutionContext {
+    // Implement the execution context structure
+    // to hold the variable values and provide methods
+    // for accessing and updating variable values
+    modal_state: ModalState,
+    variables: Variables,
+}
+struct ModalState {
+    // Implement the modal state variables and operations here
+}
+
+struct Variables {
+    // Implement the variables storage and operations here
+    // Example: map of variable names to their values
+}
+
+/*
+==================================================================================================================================
+          ///                    Implaments                              ///
+         ///                         to                                 ///
+        ///            Interpret and Parse Command Line                ///
+==================================================================================================================================
+*/
+
+fn evaluate_condition(context: &ExecutionContext, condition: &str) -> bool {
+    // Implement the evaluation of conditions based on the G-code specification
+    // and the context (variable values) available in the `context` parameter
+    // Return true if the condition is true, otherwise false
+    unimplemented!()
+}
+
+fn execute_commands(context: &mut ExecutionContext, commands: &str) {
+    // Implement the execution of G-code commands based on the G-code specification
+    // and update the `context` (variable values) accordingly
+    unimplemented!()
+}
+
+impl ModalState {
+    fn new() -> Self {
+        // Initialize the default modal state values
+        ModalState {}
+    }
+}
+
+
+impl Variables {
+    fn new() -> Self {
+        // Initialize the variables map
+        Variables {}
+    }
+}
+
+impl ExecutionContext {
+    fn new() -> Self {
+        // Implement the initialization of the execution context
+        // with default values for variables
+        unimplemented!()
     }
 
-    for mat in matches {
-        let parsed_commands_clone = Arc::clone(&parsed_commands);
-        let command_text = mat.as_str();
-        let command = parsed_commands_clone.lock().unwrap()(command_text);
-        let function = &line[mat.start()..mat.start() + 1];
-        let expression = mat.as_str();
-        
-        // Evaluate the trigonometric expression
-        if let Some(value) = evaluate_trig(expression) {
-            // Replace the expression in the G-code line with the evaluated value
-            let processed_line = line.replace(expression, &value.to_string());
+    fn get_variable_value(&self, variable: &str) -> Option<f64> {
+        // Implement the method to retrieve the value of a variable
+        // from the execution context
+        unimplemented!()
+    }
 
-            // Push the processed line to the output vector
-            output.push(processed_line);
+    fn set_variable_value(&mut self, variable: &str, value: f64) {
+        // Implement the method to update the value of a variable
+        // in the execution context
+        unimplemented!()
+    }
+
+    fn execute_gcode(&mut self, gcode: &str) {
+        let lines: Vec<&str> = gcode.split('\n').collect();
+        for line in lines {
+            let trimmed_line = line.trim();
+            if trimmed_line.is_empty() {
+                continue;
+            }
+            let command = self.parse_command(trimmed_line);
+            self.interpret_command(&command);
         }
+    }
 
+    fn parse_command(&self, line: &str) -> Command {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        if tokens.is_empty() {
+            return Command::Default;
+        }
+        match tokens[0] {
+            "G" => Command::GCode(line.to_string()),
+            "M" => Command::MCode(line.to_string()),
+            "T" => Command::TCode(line.to_string()),
+            "F" => Command::FCode(line.to_string()),
+            "S" => Command::SCode(line.to_string()),
+            "IF" => Command::IfStatement(line.to_string()),
+            "WHILE" => Command::WhileLoop(line.to_string()),
+            _ => Command::Default,
+        }
+    }
+
+    fn interpret_command(&mut self, command: &Command) {
         match command {
-            Some(GCodeCommand::NCommand(_)) => {
-                output.push(line);
-                return;
-            }
-            Some(GCodeCommand::MCommand(_)) => {
-                output.push(line);
-                return;
-            }
-            Some(GCodeCommand::GCommand(_)) => {
-                output.push(line);
-                return;
-            }
-            Some(GCodeCommand::IfStatement(_)) => {
-                output.push(line);
-                return;
-            }
-            Some(GCodeCommand::WhileLoop(_)) => {
-                output.push(line);
-                return;
-            }
-            Some(GCodeCommand::MacroCall(_)) => {
-                output.push(line);
-                return;
-            }
-            Some(GCodeCommand::VariableAssignment(_)) => {
-                output.push(line);
-                return;
-            }
-            None => {
-                output.push(line);
-                return;
-            }
-        }
+            Command::GCode(g) => {
+                // Handle GCode command
+                let re_g0 = Regex::new(r"^G[0]0*$").unwrap();
+                let re_g1 = Regex::new(r"^G[0]1*$").unwrap();
+                let re_g2 = Regex::new(r"^G[0]2*$").unwrap();
+                let re_g3 = Regex::new(r"^G[0]3*$").unwrap();
+                let re_g4 = Regex::new(r"^G[0]4*$").unwrap();
+                let re_g5 = Regex::new(r"^G[0]5*$").unwrap();
+                let re_g6 = Regex::new(r"^G[0]6*$").unwrap();
+                let re_g7 = Regex::new(r"^G[0]7*$").unwrap();
+                let re_g8 = Regex::new(r"^G[0]8*$").unwrap();
+                let re_g9 = Regex::new(r"^G[0]9*$").unwrap();
 
-    }
-
-    let parsed_commands_clone = Arc::clone(&parsed_commands);
-
-    // Define a vector to hold the parsed commands
-    let commands: Vec<GCodeCommand> = Vec::new();
-
-    // Create a mutable reference to the function
-    let parsed_commands  = Arc::clone(&parsed_commands);
-    
-    // Create a vector to hold the child threads
-    let mut threads = vec![];
-    
-    // Iterate over the G-code lines and spawn a thread for each line
-    for line in gcode {
-        // Clone the shared state for each thread
-        let parsed_commands_clone = Arc::clone(&parsed_commands);
-
-        // Spawn a new thread to parse and process the command
-        let thread = thread::spawn(move || {
-            // Parse the command
-            let command = parsed_commands_clone.lock().unwrap()(line);
-
-            // Lock the parsed_commands mutex and add the command to the shared state
-            let mut parsed_commands = parsed_commands_clone.lock().unwrap();
-            if let Some(command) = command {
-                parsed_commands.push(command);
-            }
-        });
-
-        // Store the thread in the vector
-        threads.push(thread);
-        }
-
-    // Wait for all threads to complete
-    for thread in threads {
-        thread.join().unwrap();
-    }
-
-    // Retrieve the parsed commands from the shared state
-    let parsed_commands = parsed_commands.lock().unwrap();
-
-    // Process the parsed commands concurrently (Changed process_command to parse_command)
-    parsed_commands_clone.lock().unwrap().par_iter().for_each(|command| {
-    //parsed_commands.par_iter().for_each(|command| {
-        process_command(command);
-    });
-
-    // Push the original line to the output vector
-    output.push(line);
-}
-
-
-/*  
-=================================================================================================================================
-          ///                                    ///
-         ///         G-Codes and Macros         ///
-        ///                                    ///
-=================================================================================================================================
-*/
-
-// Function to parse a single G-code command
-fn parsed_commands(line: &str) -> Option<GCodeCommand> {
-    //let parsed_commands = parsed_commands_clone.lock().unwrap();
-    let result = command_line_parser(line);
-    if let Ok((_, command_line)) = result {
-        Some(parse_gcode_command(command_line))
-    } else {
-        None
-    }
-}
-
-fn process_command(command: &GCodeCommand) {
-    match command {
-        GCodeCommand::NCommand(number) => {
-            // Process N command
-            println!("N command: {}", number);
-        }
-        GCodeCommand::MCommand(m_command) => {
-            // Process M command
-            println!("M command: {:?}", m_command);
-        }
-        GCodeCommand::GCommand(g_command) => {
-            // Process G command
-            println!("G command: {:?}", g_command);
-        }
-        GCodeCommand::IfStatement(if_statement) => {
-            // Process if statement
-            println!("If statement: {:?}", if_statement);
-        }
-        GCodeCommand::WhileLoop(while_loop) => {
-            // Process while loop
-            println!("While loop: {:?}", while_loop);
-        }
-        GCodeCommand::MacroCall(macro_call) => {
-            // Process macro call
-            println!("Macro call: {:?}", macro_call);
-        }
-        GCodeCommand::VariableAssignment(variable_assignment) => {
-            // Process variable assignment
-            println!("Variable assignment: {:?}", variable_assignment);
-        }
-    }
-}
-
-fn parse_gcode_command(command_line: CommandLine) -> GCodeCommand {
-    match command_line.command.as_str() {
-        "N" => GCodeCommand::NCommand(command_line.line_number),
-        "M" => GCodeCommand::MCommand(parse_m_command(command_line.arguments)),
-        "G" => GCodeCommand::GCommand(parse_g_command(command_line.arguments)),
-        "IF" => GCodeCommand::IfStatement(parse_if_statement(command_line.arguments)),
-        "WHILE" => GCodeCommand::WhileLoop(parse_while_loop(command_line.arguments)),
-        _ => GCodeCommand::MacroCall(parse_macro_call(
-            command_line.command,
-            command_line.arguments,
-        )),
-    }
-}
-
-fn parse_m_command(arguments: HashMap<String, String>) -> MCommand {
-    let code = arguments.get("M").unwrap().to_string();
-
-    let parameters: Vec<(char, f64)> = arguments
-        .into_iter()
-        .filter(|(key, _)| key.starts_with(char::is_alphabetic))
-        .filter_map(|(key, value)| {
-            let parameter = key.chars().next().unwrap();
-            let value = value.parse::<f64>().ok()?;
-            Some((parameter, value))
-        })
-        .collect();
-
-    MCommand { code, parameters }
-}
-
-fn parse_macro_call(name: String, arguments: HashMap<String, String>) -> MacroCall {
-    let parameters: Vec<(char, f64)> = arguments
-        .into_iter()
-        .filter(|(key, _)| key.starts_with(char::is_alphabetic))
-        .filter_map(|(key, value)| {
-            let parameter = key.chars().next().unwrap();
-            let value = value.parse::<f64>().ok()?;
-            Some((parameter, value))
-        })
-        .collect();
-
-    MacroCall { name, parameters }
-}
-
-fn parse_g_command(arguments: HashMap<String, String>) -> GCommand {
-    let codes = arguments
-        .get("G")
-        .unwrap_or(&"".to_string())
-        .chars()
-        .collect();
- 
-    GCommand { codes }
-}
-
-fn parse_command_letter(input: &str) -> IResult<&str, String> {
-    let (input, _) = multispace0(input)?;
-    let (input, _) = char('G')(input)?;
-    let (input, _) = multispace1(input)?;
-
-    Ok((input, "G".to_string()))
-}
-
-
-/*  
-=================================================================================================================================
-          ///                                 ///
-         ///         Logic and Loops         ///
-        ///                                 ///
-=================================================================================================================================
-*/
-
-fn parse_if_statement(arguments: HashMap<String, String>) -> IfStatement {
-    let condition_str = arguments.get("CONDITION").unwrap();
-    
-    let condition = parse_expression(condition_str);
-
-    let mut commands = Vec::new();
-    let mut else_if_conditions = Vec::new();
-    let mut else_commands = None;
-
-    for (key, value) in arguments {
-        match key.as_str() {
-            "THEN" => commands = parse_gcode_block(&value),
-            "ELSE_IF" => {
-                let else_if_condition = parse_expression(&value);
-                let else_if_commands = parse_gcode_block(&value);
-                else_if_conditions.push((else_if_condition, else_if_commands));
-            }
-            "ELSE" => else_commands = Some(parse_gcode_block(&value)),
-            _ => (),
-        }
-    }
-
-    IfStatement {
-        condition,
-        commands,
-        else_if_conditions,
-        else_commands,
-    }
-}
-
-fn parse_while_loop(arguments: HashMap<String, String>) -> WhileLoop {
-    let condition_str = arguments.get("CONDITION").unwrap();
-
-    let condition = parse_expression(condition_str);
-
-    let commands = parse_gcode_block(arguments.get("DO").unwrap());
-
-    WhileLoop { condition, commands }
-}
-
-
-/*  
-=================================================================================================================================
-          ///                              ///
-         ///         Expressions          ///
-        ///                              ///
-=================================================================================================================================
-*/
-
-fn parse_expression(expression: &str) -> Expression {
-    match expression_parser(expression) {
-        Ok((_, parsed_expression)) => parsed_expression,
-        Err(_) => Expression::Constant(0.0), // Default to 0.0 if parsing fails
-    }
-}
-
-fn parse_gcode_block(block: &str) -> Vec<GCodeCommand> {
-    let commands: Vec<GCodeCommand> = block
-        .split('\n')
-        .filter_map(|line| parsed_commands(line))
-        .collect();
-
-    commands
-}
-
-fn expression_parser(input: &str) -> IResult<&str, Expression> {
-    preceded(
-        multispace0,
-        alt((
-            constant_expression_parser,
-            program_variable_expression_parser,
-            variable_expression_parser,
-            function_call_expression_parser,
-            binary_operation_parser,
-        )),
-    )(input)
-}
-
-fn constant_expression_parser(input: &str) -> IResult<&str, Expression> {
-    map_res(digit1, |digits: &str| {
-        digits.parse::<f64>()
-            .map(Expression::Constant)
-            .map_err(|_| Error::from_error_kind(digits, ErrorKind::Digit))
-    })(input)
-}
-
-fn program_variable_expression_parser(input: &str) -> IResult<&str, Expression> {
-    map_res(
-        delimited(char('#'), digit1, char('.').or(char('E')).or(char('e'))),
-        |digits: &str| {
-            digits.parse::<f64>()
-                .map(Expression::Number)
-                .map_err(|_| Error::from_error_kind(digits, ErrorKind::Digit))
-        },
-    )(input)
-}
-
-fn variable_expression_parser(input: &str) -> IResult<&str, Expression> {
-    map_res(alphanumeric1, |var: &str| {
-        var.chars()
-            .next()
-            .map(Expression::Variable)
-            .ok_or(Error::from_error_kind(var, ErrorKind::AlphaNumeric))
-    })(input)
-}
-
-fn function_call_expression_parser(input: &str) -> IResult<&str, Expression> {
-    map_res(
-        separated_list1(
-            multispace1,
-            alt((
-                map_res(alphanumeric1, |s: &str| {
-                    s.parse::<f64>().map(Expression::Constant)
-                }),
-                map_res(alphanumeric1, |s: &str| {
-                    Ok(Expression::FunctionCall(s.to_string(), vec![]))
-                }),
-            )),
-        ),
-        |expressions: Vec<Expression>| {
-            let mut iter = expressions.into_iter();
-            let function_name = match iter.next() {
-                Some(Expression::FunctionCall(name, _)) => name,
-                Some(Expression::Constant(constant)) => {
-                    return Ok(Expression::Constant(constant));
+                if re_g0.is_match(g) {
+                    // Handle G0 or G00 command
+                    let coordinates: Vec<&str> = g.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting G0 or G00 command: {:?}", coordinates);
+                } else if re_g1.is_match(g) {
+                    // Handle G01 command
+                    let coordinates: Vec<&str> = g.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting G1 or G01 command: {:?}", coordinates);
+                } else if re_g2.is_match(g) {
+                    // Handle G2 or G02 command
+                    let coordinates: Vec<&str> = g.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting G2 or G02 command: {:?}", coordinates);
+                } else if re_g3.is_match(g) {
+                    // Handle G3 or G03 command
+                    let coordinates: Vec<&str> = g.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting G3 or G03 command: {:?}", coordinates);
+                } else if re_g4.is_match(g) {
+                    // Handle G4 or G04 command
+                    let coordinates: Vec<&str> = g.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting G4 or G04 command: {:?}", coordinates);
+                } else if re_g5.is_match(g) {
+                    // Handle G5 or G05 command
+                    let coordinates: Vec<&str> = g.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting G5 or G05 command: {:?}", coordinates);
+                } else if re_g6.is_match(g) {
+                    // Handle G6 or G06 command
+                    let coordinates: Vec<&str> = g.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting G6 or G06 command: {:?}", coordinates);
+                } else if re_g7.is_match(g) {
+                    // Handle G7 or G07 command
+                    let coordinates: Vec<&str> = g.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting G7 or G07 command: {:?}", coordinates);
+                } else if re_g8.is_match(g) {
+                    // Handle G8 or G08 command
+                    let coordinates: Vec<&str> = g.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting G8 or G08 command: {:?}", coordinates);
+                } else if re_g9.is_match(g) {
+                    // Handle G9 or G09 command
+                    let coordinates: Vec<&str> = g.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting G9 or G09 command: {:?}", coordinates);
+                } else if g.starts_with("G10") {
+                    // Handle G10 command
+                    let coordinates: Vec<&str> = g.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting G10 command: {:?}", coordinates);
+                } else {
+                    // Handle other GCode commands
+                    println!("Interpreting GCode command: {:?}", g);
                 }
-                Some(_) => return Err(Error::from_error_kind(input, ErrorKind::AlphaNumeric)),
-                None => return Err(Error::from_error_kind(input, ErrorKind::AlphaNumeric)),
-            };
-            let arguments = iter.collect();
-            Ok(Expression::FunctionCall(function_name, arguments))
-        },
-    )(input)
-}
+            }
+            Command::MCode(m) => {
+                // Handle MCode command
+                let re_m0 = Regex::new(r"^M[0]0*$").unwrap();
+                let re_m1 = Regex::new(r"^M[0]1*$").unwrap();
+                let re_m2 = Regex::new(r"^M[0]2*$").unwrap();
+                let re_m3 = Regex::new(r"^M[0]3*$").unwrap();
+                let re_m4 = Regex::new(r"^M[0]4*$").unwrap();
+                let re_m5 = Regex::new(r"^M[0]5*$").unwrap();
+                let re_m6 = Regex::new(r"^M[0]6*$").unwrap();
+                let re_m7 = Regex::new(r"^M[0]7*$").unwrap();
+                let re_m8 = Regex::new(r"^M[0]8*$").unwrap();
+                let re_m9 = Regex::new(r"^M[0]9*$").unwrap();
 
-
-/*  
-=================================================================================================================================
-          ///                           ///
-         ///         Operators         ///
-        ///                           ///
-=================================================================================================================================
-*/
-
-fn binary_operation_parser(input: &str) -> IResult<&str, Expression> {
-    let (input, left) = expression_parser(input)?;
-
-    let (input, operator) = alt((
-        map_res(tag("+"), |_| Ok(BinaryOperator::Add)),
-        map_res(tag("-"), |_| Ok(BinaryOperator::Subtract)),
-        map_res(tag("*"), |_| Ok(BinaryOperator::Multiply)),
-        map_res(tag("/"), |_| Ok(BinaryOperator::Divide)),
-    ))(input)?;
-
-    let (input, right) = expression_parser(input)?;
-
-    let binary_operation = BinaryOperation {
-        left: Box::new(left),
-        operator,
-        right: Box::new(right),
-    };
-
-    Ok((input, Expression::BinaryOperation(Box::new(binary_operation))))
-}
-
-fn command_line_parser(input: &str) -> IResult<&str, CommandLine> {
-    let (input, line_number) = parse_line_number(input)?;
-    let (input, command) = parse_command_letter(input)?;
-    let (input, arguments) = parse_arguments(input)?;
-
-    let command_line = CommandLine {
-        line_number,
-        command,
-        arguments,
-    };
-
-    Ok((input, command_line))
-}
-
-fn parse_line_number(input: &str) -> IResult<&str, String> {
-    let (input, _) = multispace0(input)?;
-    let (input, line_number) = map_res(digit1, |digits: &str| {
-        Ok(digits.to_string())
-    })(input)?;
-    let (input, _) = multispace0(input)?;
-
-    Ok((input, line_number))
-}
-
-
-/*  
-=================================================================================================================================
-          ///                           ///
-         ///         Arguments         ///
-        ///                           ///
-=================================================================================================================================
-*/
-
-fn parse_arguments(input: &str) -> IResult<&str, HashMap<String, String>> {
-    let (input, _) = multispace0(input)?;
-    let (input, argument_list) = many0(parse_argument)(input)?;
-    let (input, _) = multispace0(input)?;
-
-    let arguments: HashMap<String, String> = argument_list.into_iter().collect();
-
-    Ok((input, arguments))
-}
-
-fn parse_argument(input: &str) -> IResult<&str, (String, String)> {
-    let (input, _) = multispace0(input)?;
-    let (input, name) = parse_argument_name(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, _) = char(':')(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, value) = parse_argument_value(input)?;
-    let (input, _) = multispace0(input)?;
-
-    Ok((input, (name, value)))
-}
-
-fn parse_argument_name(input: &str) -> IResult<&str, String> {
-    let (input, _) = multispace0(input)?;
-    let (input, name) = alphanumeric1(input)?;
-    let (input, _) = multispace0(input)?;
-
-    Ok((input, name.to_string()))
-}
-
-fn parse_argument_value(input: &str) -> IResult<&str, String> {
-    let (input, _) = multispace0(input)?;
-    let (input, value) = alt((
-        delimited(char('"'), take_until("\""), char('"')),
-        map_res(alphanumeric1, |s: &str| Ok(s.to_string())),
-    ))(input)?;
-    let (input, _) = multispace0(input)?;
-
-    Ok((input, value.to_string()))
-}
-
-
-/*
-==================================================================================================================================
-          ///                                        ///
-         ///         Trigonomic Expressions         ///
-        ///                                        ///
-==================================================================================================================================
-*/
-
-// Regular expression pattern to match trigonometric functions in G-code
-const TRIG_PATTERN: &str = r"([A-Z])(.*?)(\[[A-Za-z]+\(.+?\).*?\])";
-
-// Function to evaluate trigonometric expressions
-fn evaluate_trig(expression: &str) -> Option<f64> {
-    // Remove the square brackets and extract the function and argument
-    let expression = expression.trim_matches(|c| c == '[' || c == ']');
-    let parts: Vec<&str> = expression.split('(').collect();
-    let function = parts.get(0)?;
-    let argument = parts.get(1)?;
-
-    // Extract the value within the parentheses and evaluate the trigonometric function
-    let value = argument[..argument.len() - 1].parse::<f64>().ok()?;
-    match function {
-        &"SIN" => Some((value * FRAC_PI_8).sin()),
-        &"COS" => Some((value * FRAC_PI_8).cos()),
-        &"TAN" => Some((value * FRAC_PI_8).tan()),
-        _ => None,
+                if re_m0.is_match(m) {
+                    // Handle M0 or M00 command
+                    let coordinates: Vec<&str> = m.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting M0 or M00 command: {:?}", coordinates);
+                } else if re_m1.is_match(m) {
+                    // Handle M1 or M01 command
+                    let coordinates: Vec<&str> = m.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting M1 or M01 command: {:?}", coordinates);
+                } else if re_m2.is_match(m) {
+                    // Handle M2 or M02 command
+                    let coordinates: Vec<&str> = m.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting M2 or M02 command: {:?}", coordinates);
+                } else if re_m3.is_match(m) {
+                    // Handle M3 or M03 command
+                    let coordinates: Vec<&str> = m.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting M3 or M03 command: {:?}", coordinates);
+                } else if re_m4.is_match(m) {
+                    // Handle M4 or M04 command
+                    let coordinates: Vec<&str> = m.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting M4 or M04 command: {:?}", coordinates);
+                } else if re_m5.is_match(m) {
+                    // Handle M5 or M05 command
+                    let coordinates: Vec<&str> = m.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting M5 or M05 command: {:?}", coordinates);
+                } else if re_m6.is_match(m) {
+                    // Handle M6 or M06 command
+                    let coordinates: Vec<&str> = m.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting M6 or M06 command: {:?}", coordinates);
+                } else if re_m7.is_match(m) {
+                    // Handle M7 or M07 command
+                    let coordinates: Vec<&str> = m.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting M7 or M07 command: {:?}", coordinates);
+                } else if re_m8.is_match(m) {
+                    // Handle M8 or M08 command
+                    let coordinates: Vec<&str> = m.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting M8 or M08 command: {:?}", coordinates);
+                } else if re_m9.is_match(m) {
+                    // Handle M9 or M09 command
+                    let coordinates: Vec<&str> = m.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting M9 or M09 command: {:?}", coordinates);
+                } else if m.starts_with("M10") {
+                    // Handle M10 command
+                    let coordinates: Vec<&str> = m.split_whitespace().skip(1).collect();
+                    // Process the coordinates...
+                    println!("Interpreting M10 command: {:?}", coordinates);
+                } else {
+                    // Handle other GCode commands
+                    println!("Interpreting MCode command: {:?}", m);
+                }
+            }
+            Command::TCode(t) => {
+                // Handle TCode command
+                println!("Interpreting TCode command: {:?}", t);
+            }
+            Command::FCode(f) => {
+                // Handle FCode command
+                println!("Interpreting FCode command: {:?}", f);
+            }
+            Command::SCode(s) => {
+                // Handle SCode command
+                println!("Interpreting SCode command: {:?}", s);
+            }
+            Command::IfStatement(if_statement) => {
+                // Handle IfStatement command
+                println!("Interpreting IfStatement: {:?}", if_statement);
+            }
+            Command::WhileLoop(while_loop) => {
+                // Handle WhileLoop command
+                println!("Interpreting WhileLoop: {:?}", while_loop);
+            }
+            Command::Default => {
+                // Handle default command
+                println!("Interpreting default command");
+            }
+        }
     }
 }
 
 
+
 /*
 ==================================================================================================================================
-          ///                      ///
-         ///         Main         ///
-        ///                      ///
+          ///                                                                ///
+         ///         Main with Parsing, Logic, Variables, and Loops         ///
+        ///                                                                ///
 ==================================================================================================================================
 */
 
 fn main() {
-    // Example G-code
-    let gcode = Arc::new(Mutex::new(String::from(
-        "
-        N000 O0001 (This is a comment on code)
+    let mut context = ExecutionContext::new();
+
+    let gcode = r#"N000 O0001 (This is a comment on code)
         N001 M06 T1
         N002 G0 G20 G54 X2.00 Y2.00 Z4.00
         N003 G01 G43 F20.0 Z-5.00 H01 M08
@@ -773,50 +449,113 @@ fn main() {
         N027 #1=ABS[#9]
         N028 #1=LN[#10]
         N029 #1=EXP[#11] (Exponent base e)
-        N030 #1=ADP[#12] (Add a decimal point to the end of the number)
-        N031 #1=ROUND[#13]
-        N032 #1=FUP[#14]
-        N033 #1=FIX[#15]
-        N034 #1=BIN[#16] (Convert from BCD to binary)
-        N035 #1=BCD[#17] (Convert from binary to BCD)
-        N036 DPRNT [OUTPUT*TIME:**#3000[60]]
-        N037 M30
-        ",
-    )));
+        N030 #1=ADP..."#;
 
-    let parsed_commands: Arc<Mutex<ParsedCommandFn>> = Arc:new(Mutex::new(Box::new(parsed_commands)));
+    let re_goto = Regex::new(r"GOTO N(\d+)").unwrap();
+    let re_if_else = Regex::new(r"(IF|ELSE|ELSE IF) ([^[]+)\[(.+)\]").unwrap();
+    let re_while_end = Regex::new(r"(WHILE|END)(\d+)").unwrap();
+    let lines: Vec<&str> = gcode.split('\n').collect();
 
-    // Vector to store the processed G-code lines
-    let output = Arc::new(Mutex::new(Vec::new()));
+    let mut line_num = 0;
+    let mut nested_level = 0;
+    let mut loop_stack = Vec::new();
 
-    // Split the G-code into individual lines
-    let lines: Vec<String> = gcode
-        .lock()
-        .unwrap()
-        .trim()
-        .split('\n')
-        .map(|line| String::from(line.trim()))
-        .collect();
+    while line_num < lines.len() {
+        let line = lines[line_num].trim();
+        if line.is_empty() {
+            line_num += 1;
+            continue;
+        }
 
-    // Process the G-code lines in parallel using multiple threads
-    let handles: Vec<_> = lines
-        .into_iter()
-        .map(|line| {
-            let gcode = Arc::clone(&gcode);
-            let output = Arc::clone(&output);
-            thread::spawn(move || process_gcode_line(line:, output:, commands:, gcode:, parsed_commands:,))
-        })
-        .collect();
+        if let Some(caps) = re_goto.captures(line) {
+            // Handle GOTO command
+            let target_line = caps[1].parse::<usize>().unwrap();
+            line_num = target_line;
+            continue;
+        }
 
-    // Wait for all threads to finish
-    for handle in handles {
-        handle.join().unwrap();
-    }
+        if let Some(caps) = re_if_else.captures(line) {
+            // Handle IF/ELSE/ELSE IF statements
+            let statement_type = &caps[1];
+            let condition = &caps[2];
+            let commands = &            caps[3];
 
-    // Print the processed G-code lines
-    let output = output.lock().unwrap();
-    for line in &*output {
-        println!("{}", line);
+            match statement_type {
+                "IF" => {
+                    // Evaluate the condition and execute the corresponding commands
+                    let condition_result = evaluate_condition(&context, condition);
+                    if condition_result {
+                        execute_commands(&mut context, commands);
+                        line_num += 1;
+                        continue;
+                    }
+                }
+                "ELSE IF" => {
+                    // Evaluate the condition and execute the corresponding commands if the previous conditions were false
+                    let condition_result = evaluate_condition(&context, condition);
+                    if condition_result && nested_level == 0 {
+                        execute_commands(&mut context, commands);
+                        line_num += 1;
+                        continue;
+                    }
+                }
+                "ELSE" => {
+                    // Execute the corresponding commands if the previous conditions were false
+                    if nested_level == 0 {
+                        execute_commands(&mut context, commands);
+                        line_num += 1;
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(caps) = re_while_end.captures(line) {
+            // Handle WHILE/END statements
+            let statement_type = &caps[1];
+            let loop_id = caps[2].parse::<usize>().unwrap();
+
+            match statement_type {
+                "WHILE" => {
+                    // Evaluate the condition and push the loop onto the stack if it's true
+                    let condition = lines[line_num + 1].trim_start_matches("IF").trim();
+                    let condition_result = evaluate_condition(&context, condition);
+                    if condition_result {
+                        loop_stack.push(loop_id);
+                    } else {
+                        // Skip lines until the corresponding END statement
+                        let mut nested_end_count = 0;
+                        while line_num < lines.len() - 1 {
+                            line_num += 1;
+                            if lines[line_num].trim() == format!("END{}", loop_id) {
+                                if nested_end_count == 0 {
+                                    break;
+                                } else {
+                                    nested_end_count -= 1;
+                                }
+                            } else if re_while_end.is_match(lines[line_num].trim()) {
+                                nested_end_count += 1;
+                            }
+                        }
+                    }
+                }
+                "END" => {
+                    // Pop the loop from the stack if its corresponding END statement is reached
+                    if let Some(last_loop) = loop_stack.pop() {
+                        if last_loop != loop_id {
+                            panic!("Mismatched loop statements");
+                        }
+                    } else {
+                        panic!("Unexpected END statement");
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Process other G-code commands here
+
+        line_num += 1;
     }
 }
-
