@@ -21,6 +21,7 @@
 
 
 
+
 //use core::num::dec2flt::number::Number;
 ///These are active to enable program to compile during standalone development 
 #[allow(unused_imports)]
@@ -37,7 +38,14 @@
 */
 
 use regex::Regex;
-
+use std::collections::HashMap;
+use std::process;
+use std::io::{BufRead, BufReader, Write};
+use nom::error::context;
+use std::error::Error;
+use std::fs;
+use std::env;
+use std::path::Path;
 
 /*
 ==================================================================================================================================
@@ -138,12 +146,18 @@ struct ExecutionContext {
     variables: Variables,
 }
 struct ModalState {
-    // Implement the modal state variables and operations here
+    // Add your state variables here
+    feed_rate: f64,
+    spindle_speed: f64,
+    // Add more state variables as needed
 }
+
 
 struct Variables {
     // Implement the variables storage and operations here
     // Example: map of variable names to their values
+    // Assuming variables are stored as key-value pairs of strings
+    variables: HashMap<String, f64>
 }
 
 /*
@@ -158,50 +172,164 @@ fn evaluate_condition(context: &ExecutionContext, condition: &str) -> bool {
     // Implement the evaluation of conditions based on the G-code specification
     // and the context (variable values) available in the `context` parameter
     // Return true if the condition is true, otherwise false
-    unimplemented!()
+    // Assume that the condition is a simple equality check between two variables
+    let parts: Vec<&str> = condition.split('=').map(|s| s.trim()).collect();
+    if parts.len() != 2 {
+        eprintln!("Invalid condition format: {}", condition);
+        return false;
+    }
+
+    let variable1 = parts[0];
+    let variable2 = parts[1];
+
+    // Assuming both variables are strings
+    let value1 = match context.get_variable(variable1) {
+        Some(val) => *val,
+        None => {
+            eprintln!("Variable not found: {}", variable1);
+            return false;
+        }
+    };
+
+    let value2 = match context.get_variable(variable2) {
+        Some(val) => *val,
+        None => {
+            eprintln!("Variable not found: {}", variable2);
+            return false;
+        }
+    };
+
+    value1 == value2
 }
 
-fn execute_commands(context: &mut ExecutionContext, commands: &str) {
-    // Implement the execution of G-code commands based on the G-code specification
-    // and update the `context` (variable values) accordingly
-    unimplemented!()
+
+fn execute_commands(context: &mut ExecutionContext, mut commands: impl FnMut(&mut ExecutionContext)) {
+    
+    // Call the callback function and pass the mutable reference to the context
+    commands(context);
+
+    // Create a buffer to store the output
+    let buffer = Vec::new();
+
+    // Convert the buffer into a String
+    let command_string = String::from_utf8_lossy(&buffer).to_string();
+
+    // Split the commands into individual lines
+    let lines = command_string.lines();
+
+    // Process each command line
+    for line in lines {
+        // Split the line into individual command tokens
+        let tokens: Vec<&str> = line.trim().split_whitespace().collect();
+
+        // Check if the line is a variable assignment
+        if tokens.len() >= 3 && tokens[1] == "=" {
+            let variable = tokens[0];
+            let value: f64 = tokens[2].parse().unwrap();
+
+            // Set the variable in the context's variables
+            context.variables.variables.insert(variable.to_string(), value);
+        }
+
+        // Get the command and its arguments
+        if let Some((command, args)) = tokens.split_first() {
+            match *command {
+                "PRINT" => {
+                    // Execute the PRINT command
+                    if let Some((variable, _)) = args.split_first() {
+                        if let Some(value) = context.variables.get_variable_value(variable) {
+                            println!("{} = {}", variable, value);
+                        }
+                    }
+                }
+                // Add more commands as needed
+
+                _ => {
+                    println!("Unknown command: {}", command);
+                }
+            }
+        }
+    }
 }
+
 
 impl ModalState {
     fn new() -> Self {
-        // Initialize the default modal state values
-        ModalState {}
+        // Initialize the state variables to their default values
+        ModalState {
+            feed_rate: 0.0,
+            spindle_speed: 0.0,
+            // Initialize more state variables here
+        }
     }
+
+    fn set_feed_rate(&mut self, rate: f64) {
+        // Set the feed rate
+        self.feed_rate = rate;
+    }
+
+    pub fn set_spindle_speed(&mut self, speed: f64) {
+        // Set the spindle speed
+        self.spindle_speed = speed;
+    }
+
+    // Add more methods for setting and retrieving other state variables
 }
+
 
 
 impl Variables {
     fn new() -> Self {
-        // Initialize the variables map
-        Variables {}
+        // Initialize the variable storage
+        Variables {
+            variables: HashMap::new(),
+        }
     }
+
+    fn get_variable(&self, variable_name: &str) -> Option<&f64> {
+        self.variables.get(variable_name)
+    }
+
+    pub fn set_variable(&mut self, name: &str, value: f64) {
+        // Set the value of a variable
+        self.variables.insert(name.to_string(), value);
+    }
+
+    pub fn get_variable_value(&self, name: &str) -> Option<f64> {
+        // Get the value of a variable
+        self.variables.get(name).cloned()
+    }
+
+    // Add more methods for manipulating variables
 }
+
+
 
 impl ExecutionContext {
     fn new() -> Self {
         // Implement the initialization of the execution context
         // with default values for variables
-        unimplemented!()
+        ExecutionContext {
+            modal_state: ModalState::new(),
+            variables: Variables::new(),
+        }
     }
 
-    fn get_variable_value(&self, variable: &str) -> Option<f64> {
+    fn get_variable(&self, variable_name: &str) -> Option<&f64> {
         // Implement the method to retrieve the value of a variable
         // from the execution context
-        unimplemented!()
+        self.variables.variables.get(variable_name)
     }
 
-    fn set_variable_value(&mut self, variable: &str, value: f64) {
+    fn set_variable(&mut self, variable_name: &str, value: f64) {
         // Implement the method to update the value of a variable
         // in the execution context
-        unimplemented!()
+        self.variables.variables.insert(variable_name.to_string(), value);
     }
 
     fn execute_gcode(&mut self, gcode: &str) {
+        // G-code execution logic goes here
+        // You can access the modal state and variables using `self.modal_state` and `self.variables`        
         let lines: Vec<&str> = gcode.split('\n').collect();
         for line in lines {
             let trimmed_line = line.trim();
@@ -406,55 +534,19 @@ impl ExecutionContext {
     }
 }
 
-
-
-/*
-==================================================================================================================================
-          ///                                                                ///
-         ///         Main with Parsing, Logic, Variables, and Loops         ///
-        ///                                                                ///
-==================================================================================================================================
-*/
-
-fn main() {
-    let mut context = ExecutionContext::new();
-
-    let gcode = r#"N000 O0001 (This is a comment on code)
-        N001 M06 T1
-        N002 G0 G20 G54 X2.00 Y2.00 Z4.00
-        N003 G01 G43 F20.0 Z-5.00 H01 M08
-        N004 M106 S255
-        N005 IF #1 > 0 GOTO N012
-        N006 ELSE IF #2 == 0 THEN [G1 X50 Y60 Z70]
-        N007 ELSE [G1 X70 Y80 Z90]
-        N008 [G1 X10 Y20 Z30 #3 = #3 + 1]
-        N009 M98 P0100
-        N010 #1000=100 #2000=X20.45 #3000=Y456.908 #4000=Z345.875
-        N011 G0 X#1000 Y#2000 Z#3000
-        N012 IF [#100 == 0] THEN #100 = 1 (Avoid dividing by zero!)
-        N013 IF [#100 <= 0] THEN #100 = 10
-        N014 ELSE [#100 >= 0] THEN #100 = -10
-        N015 WHILE [#3 == 10] DO1
-        N016 IF [#100 EQ 0] THEN #100 = 1 (Avoid dividing by zero!)
-        N017 IF [#100 GT 0] THEN #100 = 10
-        N018 IF [#100 LT 0] THEN #100 = -10
-        N019 ELSE #100=0
-        N020 END1
-        N021 #1=SIN[#2]
-        N022 #1=COS[#3]
-        N023 #1=TAN[#4]
-        N024 #1=ACOS[#5]
-        N025 #1=ATAN[#6]/[#7]
-        N026 #1=SQRT=[#8]
-        N027 #1=ABS[#9]
-        N028 #1=LN[#10]
-        N029 #1=EXP[#11] (Exponent base e)
-        N030 #1=ADP..."#;
-
+fn gcode(file_name: &str) -> Result<(), Box<dyn Error>> {
+    // Implement your gcode function logic here
+    // Use the provided file name to read and process the input file
     let re_goto = Regex::new(r"GOTO N(\d+)").unwrap();
     let re_if_else = Regex::new(r"(IF|ELSE|ELSE IF) ([^[]+)\[(.+)\]").unwrap();
     let re_while_end = Regex::new(r"(WHILE|END)(\d+)").unwrap();
-    let lines: Vec<&str> = gcode.split('\n').collect();
+        
+    let mut context = ExecutionContext::new();
+    
+    // Read the file contents into a string
+    let file_contents = fs::read_to_string(file_name)?;
+
+    let lines: Vec<&str> = file_contents.split('\n').collect();
 
     let mut line_num = 0;
     let mut nested_level = 0;
@@ -478,15 +570,18 @@ fn main() {
             // Handle IF/ELSE/ELSE IF statements
             let statement_type = &caps[1];
             let condition = &caps[2];
-            let commands = &            caps[3];
 
             match statement_type {
                 "IF" => {
                     // Evaluate the condition and execute the corresponding commands
                     let condition_result = evaluate_condition(&context, condition);
                     if condition_result {
-                        execute_commands(&mut context, commands);
-                        line_num += 1;
+                        execute_commands(&mut context, |_ctx| {
+                            let mut new_line_num = line_num;
+                            new_line_num += 1;
+                            line_num = new_line_num;
+                        });
+                        
                         continue;
                     }
                 }
@@ -494,17 +589,26 @@ fn main() {
                     // Evaluate the condition and execute the corresponding commands if the previous conditions were false
                     let condition_result = evaluate_condition(&context, condition);
                     if condition_result && nested_level == 0 {
-                        execute_commands(&mut context, commands);
-                        line_num += 1;
+                        execute_commands(&mut context, |_ctx| {
+                            let mut new_line_num = line_num;
+                            new_line_num += 1;
+                            line_num = new_line_num;
+                        });
+
                         continue;
                     }
                 }
                 "ELSE" => {
                     // Execute the corresponding commands if the previous conditions were false
                     if nested_level == 0 {
-                        execute_commands(&mut context, commands);
-                        line_num += 1;
-                        continue;
+                        execute_commands(&mut context, |_ctx| {
+                            let mut new_line_num = line_num;
+                            new_line_num += 1;
+                            line_num = new_line_num;
+                            if nested_level == 0 {
+                                // Put your code here
+                            }
+                        });
                     }
                 }
                 _ => {}
@@ -557,5 +661,54 @@ fn main() {
         // Process other G-code commands here
 
         line_num += 1;
+    }
+
+    Ok(()) // Return Ok(()) if the gcode function executes successfully
+}
+
+
+
+
+/*
+==================================================================================================================================
+          ///                                                                ///
+         ///         Main with Parsing, Logic, Variables, and Loops         ///
+        ///                                                                ///
+==================================================================================================================================
+*/
+
+fn main() {
+    let mut context = ExecutionContext::new();
+
+    let mut variables = Variables::new();
+
+    // Read command-line arguments
+    let args: Vec<String> = env::args().collect();
+
+    let mut line_num = 0;
+   
+    // Check if the input file name is provided
+    if args.len() < 2 {
+        eprintln!("Please provide the input file name.");
+        process::exit(1);
+    }
+
+    // Get the input file name from the command-line argument
+    let input_file = &args[1];
+
+    // Check if the input file has a valid extension
+    let input_path = Path::new(input_file);
+    let extension = input_path.extension().and_then(|ext| ext.to_str());
+
+    
+    if extension != Some("txt") && extension != Some("nc") {
+        eprintln!("Invalid input file format. Please provide a .txt or .nc file.");
+        process::exit(1);
+    }
+
+    // Execute the gcode function
+    match gcode(input_file) {
+        Ok(_) => println!("GCode processing completed successfully."),
+        Err(err) => eprintln!("Error during GCode processing: {}", err),
     }
 }
