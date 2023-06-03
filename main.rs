@@ -111,6 +111,8 @@ enum TrigonometricFunction {
 ==================================================================================================================================
 */
 
+
+
 #[derive(Debug)]
 struct IfStatement {
     condition: Expression,
@@ -138,6 +140,7 @@ struct TrigonometricOperation {
     argument: Box<Expression>,
 }
 
+#[derive(Default)]
 struct ExecutionContext {
     // Implement the execution context structure
     // to hold the variable values and provide methods
@@ -145,6 +148,8 @@ struct ExecutionContext {
     modal_state: ModalState,
     variables: Variables,
 }
+
+#[derive(Default)]
 struct ModalState {
     // Add your state variables here
     feed_rate: f64,
@@ -152,7 +157,7 @@ struct ModalState {
     // Add more state variables as needed
 }
 
-
+#[derive(Default)]
 struct Variables {
     // Implement the variables storage and operations here
     // Example: map of variable names to their values
@@ -168,93 +173,12 @@ struct Variables {
 ==================================================================================================================================
 */
 
-fn evaluate_condition(context: &ExecutionContext, condition: &str) -> bool {
-    // Implement the evaluation of conditions based on the G-code specification
-    // and the context (variable values) available in the `context` parameter
-    // Return true if the condition is true, otherwise false
-    // Assume that the condition is a simple equality check between two variables
-    let parts: Vec<&str> = condition.split('=').map(|s| s.trim()).collect();
-    if parts.len() != 2 {
-        eprintln!("Invalid condition format: {}", condition);
-        return false;
-    }
-
-    let variable1 = parts[0];
-    let variable2 = parts[1];
-
-    // Assuming both variables are strings
-    let value1 = match context.get_variable(variable1) {
-        Some(val) => *val,
-        None => {
-            eprintln!("Variable not found: {}", variable1);
-            return false;
-        }
-    };
-
-    let value2 = match context.get_variable(variable2) {
-        Some(val) => *val,
-        None => {
-            eprintln!("Variable not found: {}", variable2);
-            return false;
-        }
-    };
-
-    value1 == value2
-}
 
 
-fn execute_commands(context: &mut ExecutionContext, mut commands: impl FnMut(&mut ExecutionContext)) {
-    
-    // Call the callback function and pass the mutable reference to the context
-    commands(context);
-
-    // Create a buffer to store the output
-    let buffer = Vec::new();
-
-    // Convert the buffer into a String
-    let command_string = String::from_utf8_lossy(&buffer).to_string();
-
-    // Split the commands into individual lines
-    let lines = command_string.lines();
-
-    // Process each command line
-    for line in lines {
-        // Split the line into individual command tokens
-        let tokens: Vec<&str> = line.trim().split_whitespace().collect();
-
-        // Check if the line is a variable assignment
-        if tokens.len() >= 3 && tokens[1] == "=" {
-            let variable = tokens[0];
-            let value: f64 = tokens[2].parse().unwrap();
-
-            // Set the variable in the context's variables
-            context.variables.variables.insert(variable.to_string(), value);
-        }
-
-        // Get the command and its arguments
-        if let Some((command, args)) = tokens.split_first() {
-            match *command {
-                "PRINT" => {
-                    // Execute the PRINT command
-                    if let Some((variable, _)) = args.split_first() {
-                        if let Some(value) = context.variables.get_variable_value(variable) {
-                            println!("{} = {}", variable, value);
-                        }
-                    }
-                }
-                // Add more commands as needed
-
-                _ => {
-                    println!("Unknown command: {}", command);
-                }
-            }
-        }
-    }
-}
 
 
 impl ModalState {
-    fn new() -> Self {
+    pub fn new() -> Self {
         // Initialize the state variables to their default values
         ModalState {
             feed_rate: 0.0,
@@ -263,7 +187,7 @@ impl ModalState {
         }
     }
 
-    fn set_feed_rate(&mut self, rate: f64) {
+    pub fn set_feed_rate(&mut self, rate: f64) {
         // Set the feed rate
         self.feed_rate = rate;
     }
@@ -279,25 +203,22 @@ impl ModalState {
 
 
 impl Variables {
-    fn new() -> Self {
+    pub fn new() -> Self {
         // Initialize the variable storage
         Variables {
             variables: HashMap::new(),
         }
     }
 
-    fn get_variable(&self, variable_name: &str) -> Option<&f64> {
-        self.variables.get(variable_name)
-    }
 
-    pub fn set_variable(&mut self, name: &str, value: f64) {
+    fn set_variable(&mut self, variable_name: String, value: f64) {
         // Set the value of a variable
-        self.variables.insert(name.to_string(), value);
+        self.variables.insert(variable_name, value);
     }
 
-    pub fn get_variable_value(&self, name: &str) -> Option<f64> {
+    fn get_variable_value(&self, variable_name: &str) -> Option<f64> {
         // Get the value of a variable
-        self.variables.get(name).cloned()
+        self.variables.get(variable_name).cloned()
     }
 
     // Add more methods for manipulating variables
@@ -306,12 +227,97 @@ impl Variables {
 
 
 impl ExecutionContext {
+    fn evaluate_condition(&self, condition: &str) -> bool {
+        // Implement the evaluation of conditions based on the G-code specification
+        // and the context (variable values) available in the `context` parameter
+        // Return true if the condition is true, otherwise false
+        // Assume that the condition is a simple equality check between two variables
+        let parts: Vec<&str> = condition.split('=').map(|s| s.trim()).collect();
+        if parts.len() != 2 {
+            eprintln!("Invalid condition format: {}", condition);
+            return false;
+        }
+    
+        let variable1 = parts[0];
+        let variable2 = parts[1];
+    
+        // Assuming both variables are strings
+        let value1 = match self.variables.get_variable_value(variable1) {
+            Some(val) => *val,
+            None => {
+                eprintln!("Variable not found: {}", variable1);
+                return false;
+            }
+        };
+    
+        let value2 = match self.variables.get_variable_value(variable2) {
+            Some(val) => *val,
+            None => {
+                eprintln!("Variable not found: {}", variable2);
+                return false;
+            }
+        };
+    
+        value1 == value2
+    }
+
+    pub fn execute_commands(&mut self, commands: &str) {
+    
+        // Call the callback function and pass the mutable reference to the context
+        //commands(&mut self);
+    
+        // Create a buffer to store the output
+        let mut buffer = Vec::new();
+    
+        // Convert the buffer into a String
+        let command_string = String::from_utf8_lossy(&buffer).to_string();
+    
+        // Split the commands into individual lines
+        let lines = command_string.lines();
+    
+        // Process each command line
+        for line in lines {
+            // Split the line into individual command tokens
+            let tokens: Vec<&str> = line.trim().split_whitespace().collect();
+    
+            // Check if the line is a variable assignment
+            if tokens.len() >= 3 && tokens[1] == "=" {
+                let variable = tokens[0];
+                let value: f64 = tokens[2].parse().unwrap();
+    
+                // Set the variable in the context's variables
+                self.variables.set_variable_value(variable.to_string(), value);
+            }
+    
+            // Get the command and its arguments
+            if let Some((command, args)) = tokens.split_first() {
+                match *command {
+                    "PRINT" => {
+                        // Execute the PRINT command
+                        if let Some((variable, _)) = args.split_first() {
+                            if let Some(value) = self.variables.get_variable_value(variable) {
+                                println!("{} = {}", variable, value);
+                            }
+                        }
+                    }
+                    // Add more commands as needed
+    
+                    _ => {
+                        println!("Unknown command: {}", command);
+                    }
+                }
+            }
+        }
+    }
+    
+    
     fn new() -> Self {
         // Implement the initialization of the execution context
         // with default values for variables
         ExecutionContext {
             modal_state: ModalState::new(),
             variables: Variables::new(),
+
         }
     }
 
@@ -327,7 +333,7 @@ impl ExecutionContext {
         self.variables.variables.insert(variable_name.to_string(), value);
     }
 
-    fn execute_gcode(&mut self, gcode: &str) {
+    fn execute_gcode(&mut self, gcode: &Command) {
         // G-code execution logic goes here
         // You can access the modal state and variables using `self.modal_state` and `self.variables`        
         let lines: Vec<&str> = gcode.split('\n').collect();
@@ -337,24 +343,39 @@ impl ExecutionContext {
                 continue;
             }
             let command = self.parse_command(trimmed_line);
-            self.interpret_command(&command);
+            match command {
+                Ok(cmd) => {
+                    self.execute_command(&cmd);
+                }
+                Err(err) => {
+                    eprintln!("Error parsing command: {}", err);
+                }
+                Command::GCode() => todo!(),
+                Command::MCode(_) => todo!(),
+                Command::TCode(_) => todo!(),
+                Command::FCode(_) => todo!(),
+                Command::SCode(_) => todo!(),
+                Command::IfStatement(_) => todo!(),
+                Command::WhileLoop(_) => todo!(),
+                Command::Default => todo!(),
+            }
         }
     }
 
-    fn parse_command(&self, line: &str) -> Command {
+    fn parse_command(&mut self, line: &str) -> Result<Command, String> {
         let tokens: Vec<&str> = line.split_whitespace().collect();
         if tokens.is_empty() {
-            return Command::Default;
+            return Ok(Command::Default);
         }
         match tokens[0] {
-            "G" => Command::GCode(line.to_string()),
-            "M" => Command::MCode(line.to_string()),
-            "T" => Command::TCode(line.to_string()),
-            "F" => Command::FCode(line.to_string()),
-            "S" => Command::SCode(line.to_string()),
-            "IF" => Command::IfStatement(line.to_string()),
-            "WHILE" => Command::WhileLoop(line.to_string()),
-            _ => Command::Default,
+            "G" => Ok(Command::GCode(line.to_string)()),
+            "M" => Ok(Command::MCode(line.to_string())),
+            "T" => Ok(Command::TCode(line.to_string())),
+            "F" => Ok(Command::FCode(line.to_string())),
+            "S" => Ok(Command::SCode(line.to_string())),
+            "IF" => Ok(Command::IfStatement(line.to_string())),
+            "WHILE" => Ok(Command::WhileLoop(line.to_string())),
+            _ => Ok(Command::Default),
         }
     }
 
@@ -532,139 +553,141 @@ impl ExecutionContext {
             }
         }
     }
-}
 
-fn gcode(file_name: &str) -> Result<(), Box<dyn Error>> {
-    // Implement your gcode function logic here
-    // Use the provided file name to read and process the input file
-    let re_goto = Regex::new(r"GOTO N(\d+)").unwrap();
-    let re_if_else = Regex::new(r"(IF|ELSE|ELSE IF) ([^[]+)\[(.+)\]").unwrap();
-    let re_while_end = Regex::new(r"(WHILE|END)(\d+)").unwrap();
+    pub fn gcode(&self, file_name: &str) -> Result<(), Box<dyn Error>> {
+        // Implement your gcode function logic here
+        // Use the provided file name to read and process the input file
+        let re_goto = Regex::new(r"GOTO N(\d+)").unwrap();
+        let re_if_else = Regex::new(r"(IF|ELSE|ELSE IF) ([^[]+)\[(.+)\]").unwrap();
+        let re_while_end = Regex::new(r"(WHILE|END)(\d+)").unwrap();
+            
+        let mut context = ExecutionContext::new();
         
-    let mut context = ExecutionContext::new();
+        // Read the file contents into a string
+        let file_contents = fs::read_to_string(file_name)?;
     
-    // Read the file contents into a string
-    let file_contents = fs::read_to_string(file_name)?;
-
-    let lines: Vec<&str> = file_contents.split('\n').collect();
-
-    let mut line_num = 0;
-    let mut nested_level = 0;
-    let mut loop_stack = Vec::new();
-
-    while line_num < lines.len() {
-        let line = lines[line_num].trim();
-        if line.is_empty() {
-            line_num += 1;
-            continue;
-        }
-
-        if let Some(caps) = re_goto.captures(line) {
-            // Handle GOTO command
-            let target_line = caps[1].parse::<usize>().unwrap();
-            line_num = target_line;
-            continue;
-        }
-
-        if let Some(caps) = re_if_else.captures(line) {
-            // Handle IF/ELSE/ELSE IF statements
-            let statement_type = &caps[1];
-            let condition = &caps[2];
-
-            match statement_type {
-                "IF" => {
-                    // Evaluate the condition and execute the corresponding commands
-                    let condition_result = evaluate_condition(&context, condition);
-                    if condition_result {
-                        execute_commands(&mut context, |_ctx| {
-                            let mut new_line_num = line_num;
-                            new_line_num += 1;
-                            line_num = new_line_num;
-                        });
-                        
-                        continue;
-                    }
-                }
-                "ELSE IF" => {
-                    // Evaluate the condition and execute the corresponding commands if the previous conditions were false
-                    let condition_result = evaluate_condition(&context, condition);
-                    if condition_result && nested_level == 0 {
-                        execute_commands(&mut context, |_ctx| {
-                            let mut new_line_num = line_num;
-                            new_line_num += 1;
-                            line_num = new_line_num;
-                        });
-
-                        continue;
-                    }
-                }
-                "ELSE" => {
-                    // Execute the corresponding commands if the previous conditions were false
-                    if nested_level == 0 {
-                        execute_commands(&mut context, |_ctx| {
-                            let mut new_line_num = line_num;
-                            new_line_num += 1;
-                            line_num = new_line_num;
-                            if nested_level == 0 {
-                                // Put your code here
-                            }
-                        });
-                    }
-                }
-                _ => {}
+        let lines: Vec<&str> = file_contents.split('\n').collect();
+    
+        let mut line_num = 0;
+        let nested_level = 0;
+        let mut loop_stack = Vec::new();
+    
+        while line_num < lines.len() {
+            let line = lines[line_num].trim();
+            if line.is_empty() {
+                line_num += 1;
+                continue;
             }
-        }
-
-        if let Some(caps) = re_while_end.captures(line) {
-            // Handle WHILE/END statements
-            let statement_type = &caps[1];
-            let loop_id = caps[2].parse::<usize>().unwrap();
-
-            match statement_type {
-                "WHILE" => {
-                    // Evaluate the condition and push the loop onto the stack if it's true
-                    let condition = lines[line_num + 1].trim_start_matches("IF").trim();
-                    let condition_result = evaluate_condition(&context, condition);
-                    if condition_result {
-                        loop_stack.push(loop_id);
-                    } else {
-                        // Skip lines until the corresponding END statement
-                        let mut nested_end_count = 0;
-                        while line_num < lines.len() - 1 {
-                            line_num += 1;
-                            if lines[line_num].trim() == format!("END{}", loop_id) {
-                                if nested_end_count == 0 {
-                                    break;
-                                } else {
-                                    nested_end_count -= 1;
+    
+            if let Some(caps) = re_goto.captures(line) {
+                // Handle GOTO command
+                let target_line = caps[1].parse::<usize>().unwrap();
+                line_num = target_line;
+                continue;
+            }
+    
+            if let Some(caps) = re_if_else.captures(line) {
+                // Handle IF/ELSE/ELSE IF statements
+                let statement_type = &caps[1];
+                let condition = &caps[2];
+    
+                match statement_type {
+                    "IF" => {
+                        // Evaluate the condition and execute the corresponding commands
+                        let condition_result = Self::evaluate_condition(&context, condition);
+                        if condition_result {
+                            self.execute_commands(|_ctx| {
+                                let mut new_line_num = line_num;
+                                new_line_num += 1;
+                                line_num = new_line_num;
+                            });
+                                
+                            continue;
+                        }
+                    }
+                    "ELSE IF" => {
+                        // Evaluate the condition and execute the corresponding commands if the previous conditions were false
+                        let condition_result = Self::evaluate_condition(&context, condition);
+                        if condition_result && nested_level == 0 {
+                            self.execute_commands(|_ctx| {
+                                let mut new_line_num = line_num;
+                                new_line_num += 1;
+                                line_num = new_line_num;
+                            });
+    
+                            continue;
+                        }
+                    }
+                    "ELSE" => {
+                        // Execute the corresponding commands if the previous conditions were false
+                        if nested_level == 0 {
+                            execute_commands(&mut context, |_ctx| {
+                                let mut new_line_num = line_num;
+                                new_line_num += 1;
+                                line_num = new_line_num;
+                                if nested_level == 0 {
+                                    // Put your code here
                                 }
-                            } else if re_while_end.is_match(lines[line_num].trim()) {
-                                nested_end_count += 1;
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+    
+            if let Some(caps) = re_while_end.captures(line) {
+                // Handle WHILE/END statements
+                let statement_type = &caps[1];
+                let loop_id = caps[2].parse::<usize>().unwrap();
+    
+                match statement_type {
+                    "WHILE" => {
+                        // Evaluate the condition and push the loop onto the stack if it's true
+                        let condition = lines[line_num + 1].trim_start_matches("IF").trim();
+                        let condition_result = Self::evaluate_condition(&context, condition);
+                        if condition_result {
+                            loop_stack.push(loop_id);
+                        } else {
+                            // Skip lines until the corresponding END statement
+                            let mut nested_end_count = 0;
+                            while line_num < lines.len() - 1 {
+                                line_num += 1;
+                                if lines[line_num].trim() == format!("END{}", loop_id) {
+                                    if nested_end_count == 0 {
+                                        break;
+                                    } else {
+                                        nested_end_count -= 1;
+                                    }
+                                } else if re_while_end.is_match(lines[line_num].trim()) {
+                                    nested_end_count += 1;
+                                }
                             }
                         }
                     }
-                }
-                "END" => {
-                    // Pop the loop from the stack if its corresponding END statement is reached
-                    if let Some(last_loop) = loop_stack.pop() {
-                        if last_loop != loop_id {
-                            panic!("Mismatched loop statements");
+                    "END" => {
+                        // Pop the loop from the stack if its corresponding END statement is reached
+                        if let Some(last_loop) = loop_stack.pop() {
+                            if last_loop != loop_id {
+                                panic!("Mismatched loop statements");
+                            }
+                        } else {
+                            panic!("Unexpected END statement");
                         }
-                    } else {
-                        panic!("Unexpected END statement");
                     }
+                    _ => {}
                 }
-                _ => {}
             }
+    
+            // Process other G-code commands here
+    
+            line_num += 1;
         }
-
-        // Process other G-code commands here
-
-        line_num += 1;
+    
+        Ok(()) // Return Ok(()) if the gcode function executes successfully
     }
-
-    Ok(()) // Return Ok(()) if the gcode function executes successfully
+    
 }
+
 
 
 
@@ -678,7 +701,7 @@ fn gcode(file_name: &str) -> Result<(), Box<dyn Error>> {
 */
 
 fn main() {
-    let mut context = ExecutionContext::new();
+    let mut context = ExecutionContext::default();
 
     let mut variables = Variables::new();
 
@@ -707,7 +730,7 @@ fn main() {
     }
 
     // Execute the gcode function
-    match gcode(input_file) {
+    match context.execute_commands(input_file) {
         Ok(_) => println!("GCode processing completed successfully."),
         Err(err) => eprintln!("Error during GCode processing: {}", err),
     }
