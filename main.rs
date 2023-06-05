@@ -19,9 +19,6 @@
  *
  */
 
-
-
-
 //use core::num::dec2flt::number::Number;
 ///These are active to enable program to compile during standalone development 
 #[allow(unused_imports)]
@@ -38,16 +35,18 @@
 */
 
 use regex::Regex;
-use std::fmt;
 use std::collections::HashMap;
-use std::{process, default};
-use std::io::{BufRead, BufReader, Write};
-use nom::error::context;
+use std::fmt;
+use std::str::FromStr;
+use std::default;
+use std::env;
 use std::error::Error;
 use std::fs;
-use std::env;
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::str::FromStr;
+use std::process;
+use nom::error::context;
+//use core::num::dec2flt::number::Number;
 
 /*
 ==================================================================================================================================
@@ -56,28 +55,28 @@ use std::str::FromStr;
         ///                             ///
 ==================================================================================================================================
 */
-
-#[derive(Debug)]
-enum Command {
-    GCode(String),
-    MCode(String),
-    TCode(String),
-    FCode(String),
-    SCode(String),
-    IfStatement(String),
-    WhileLoop(String),
-    Unknown(String),
-}
-
-#[derive(Debug)]
-enum Expression {
-    Constant(i32),
-    Variable(String),
-    BinaryOperation(Box<BinaryOperation>),
-    TrigonometricOperation(Box<TrigonometricOperation>),
-}
-
-#[derive(Debug)]
+ 
+ #[derive(Debug)]
+ enum Command {
+     GCode(String),
+     MCode(String),
+     TCode(String),
+     FCode(String),
+     SCode(String),
+     IfStatement(String),
+     WhileLoop(String),
+     Unknown(String),
+ }
+ 
+ #[derive(Debug)]
+ enum Expression {
+     Constant(f64),
+     Variable(String),
+     BinaryOperation(Box<Expression>, BinaryOperation, Box<Expression>),
+     TrigonometricOperation(Box<Expression>, TrigonometricOperation),
+ }
+ 
+ #[derive(Debug)]
 enum BinaryOperator {
     Add,
     Subtract,
@@ -103,6 +102,7 @@ enum TrigonometricFunction {
     Bin,
     Bcd,
 }
+
 
 
 /*
@@ -164,7 +164,7 @@ struct Variables {
     // Implement the variables storage and operations here
     // Example: map of variable names to their values
     // Assuming variables are stored as key-value pairs of strings
-    variables: HashMap<String, f64>
+    variables: HashMap<String, f64>,
 }
 
 /*
@@ -175,26 +175,77 @@ struct Variables {
 ==================================================================================================================================
 */
 
-#[derive(Debug)]
-struct CustomError(String);
+// Define the Expression trait
+//trait Expression {
+//    fn evaluate_condition(&self, context: &ExecutionContext) -> f64;
+//}
 
-impl std::fmt::Display for CustomError {
+#[derive(Debug, Clone)]
+enum CommandError {
+    UnknownCommand(String),
+    // Add more specific error variants as needed
+}
+
+impl std::fmt::Display for CommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        match self {
+            CommandError::UnknownCommand(command) => write!(f, "Unknown command: {}", command),
+            // Handle other error variants here
+        }
     }
 }
 
-impl std::error::Error for CustomError {}
+impl fmt::Display for BinaryOperator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            BinaryOperator::Add => write!(f, "Add"),
+            BinaryOperator::Subtract => write!(f, "Subtract"),
+            BinaryOperator::Multiply => write!(f, "Multiply"),
+            BinaryOperator::Divide => write!(f, "Divide"),
+        }
+    }
+}
+
+impl fmt::Display for TrigonometricFunction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            TrigonometricFunction::Sin => write!(f, "Sin"),
+            TrigonometricFunction::Cos => write!(f, "Cos"),
+            TrigonometricFunction::Tan => write!(f, "Tan"),
+            TrigonometricFunction::Acos => write!(f, "Acos"),
+            TrigonometricFunction::Atan => write!(f, "Atan"),
+            TrigonometricFunction::Sqrt => write!(f, "Sqrt"),
+            TrigonometricFunction::Abs => write!(f, "Abs"),
+            TrigonometricFunction::Ln => write!(f, "Ln"),
+            TrigonometricFunction::Exp => write!(f, "Exp"),
+            TrigonometricFunction::Adp => write!(f, "Adp"),
+            TrigonometricFunction::Round => write!(f, "Round"),
+            TrigonometricFunction::Fup => write!(f, "Fup"),
+            TrigonometricFunction::Fix => write!(f, "Fix"),
+            TrigonometricFunction::Bin => write!(f, "Bin"),
+            TrigonometricFunction::Bcd => write!(f, "Bcd"),
+        }
+    }
+}
+
+
+impl std::error::Error for CommandError {}
 
 impl fmt::Display for Command {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // Implement the formatting logic for each command variant
         match self {
-            // Implement formatting for each variant
+            Command::GCode(field1) => write!(f, "GCode({})", field1),
+            Command::MCode(field1) => write!(f, "MCode({})", field1),
+            Command::TCode(field1) => write!(f, "TCode({})", field1),
+            Command::SCode(field1) => write!(f, "SCode({})", field1),
+            Command::FCode(field1) => write!(f, "FCode({})", field1),
+            Command::Unknown(field1) => write!(f, "Unknown({})", field1),
+            Command::IfStatement(field1) => write!(f, "IfStatement({})", field1),
+            Command::WhileLoop(field1) => write!(f, "WhileLoop({})", field1),
         }
     }
 }
-
 
 impl ModalState {
     pub fn new() -> Self {
@@ -237,7 +288,7 @@ impl Variables {
 
     fn get_variable_value(&self, variable_name: &str) -> Option<f64> {
         // Get the value of a variable
-        self.variables.get(variable_name).cloned()
+        self.variables.get(variable_name).copied()
     }
 
     // Add more methods for manipulating variables
@@ -246,8 +297,46 @@ impl Variables {
 
 
 impl ExecutionContext {
-    
-    
+    fn evaluate(&self, expression: &Expression) -> f64 {
+        match expression {
+            Expression::Constant(value) => *value,
+            Expression::Variable(name) => {
+                self.variables.get_variable_value(name).unwrap_or(0.0)
+            }
+            Expression::BinaryOperation(left, operator, right) => {
+                let left_value = self.evaluate(left);
+                let right_value = self.evaluate(right);
+                match **operator {
+                    BinaryOperator::Add => left_value + right_value,
+                    BinaryOperator::Subtract => left_value - right_value,
+                    BinaryOperator::Multiply => left_value * right_value,
+                    BinaryOperator::Divide => left_value / right_value,
+                }
+            }
+            Expression::TrigonometricOperation(argument, function) => {
+                let argument_value = self.evaluate(argument);
+                match **function {
+                    TrigonometricFunction::Sin => argument_value.sin(),
+                    TrigonometricFunction::Cos => argument_value.cos(),
+                    TrigonometricFunction::Tan => argument_value.tan(),
+                    TrigonometricFunction::Acos => argument_value.acos(),
+                    TrigonometricFunction::Atan => argument_value.atan(),
+                    TrigonometricFunction::Sqrt => argument_value.sqrt(),
+                    TrigonometricFunction::Abs => argument_value.abs(),
+                    TrigonometricFunction::Ln => argument_value.ln(),
+                    TrigonometricFunction::Exp => argument_value.exp(),
+                    TrigonometricFunction::Adp => unimplemented!(),
+                    TrigonometricFunction::Round => unimplemented!(),
+                    TrigonometricFunction::Fup => unimplemented!(),
+                    TrigonometricFunction::Fix => unimplemented!(),
+                    TrigonometricFunction::Bin => unimplemented!(),
+                    TrigonometricFunction::Bcd => unimplemented!(),
+                }
+            }
+        }
+    }
+
+
     fn evaluate_condition(&self, condition: &str) -> bool {
         // Implement the evaluation of conditions based on the G-code specification
         // and the context (variable values) available in the `context` parameter
@@ -282,13 +371,13 @@ impl ExecutionContext {
         value1 == value2
     }
 
-    fn execute_commands(&mut self, command: Result<Command, Box<dyn std::error::Error>>) -> Result<(), Box<dyn std::error::Error>> {
+    fn execute_commands(&mut self, command: Result<Command, CommandError>) -> Result<(), CommandError> {
         // Extract the lines of the command
         let lines = match &command {
             Ok(cmd) => cmd.to_string().lines().map(String::from).collect::<Vec<String>>(),
-            Err(err) => return Err(Box::new(err.clone())),
+            Err(err) => return Err(err.clone()),
         };
-        
+    
         // Process each command line
         for line in lines {
             // Split the line into individual command tokens
@@ -319,7 +408,7 @@ impl ExecutionContext {
                         }
                     }
                     &"Unknown" => {
-                        return Err(Box::new(CustomError(format!("Unknown command: {:?}", command)))) as Result<(), Box<dyn std::error::Error>>;
+                        return Err(CommandError::UnknownCommand(format!("{:?}", command)));
                     }
                     &"PRINT" => {
                         // Execute the PRINT command
@@ -330,9 +419,9 @@ impl ExecutionContext {
                         }
                     }
                     // Add more commands as needed
-                    //_ => {
-                    //    println!("Unknown command: {}", command);
-                    //}
+                    _ => {
+                        return Err(CommandError::UnknownCommand(format!("{:?}", command)));
+                    }
                 }
             }
         }
@@ -365,7 +454,7 @@ impl ExecutionContext {
         self.variables.variables.insert(variable_name.to_string(), value);
     }
 
-    fn parse_command(&mut self, line: &str) -> Result<Command, Box<dyn std::error::Error>> {
+    fn parse_command(&mut self, line: &str) -> Result<Command, CommandError> {
         let tokens: Vec<&str> = line.split_whitespace().collect();
         
         let command = match tokens[0] {
@@ -704,14 +793,13 @@ impl ExecutionContext {
 
 fn main() {
     let mut context = ExecutionContext::default();
-
     let mut variables = Variables::new();
 
     // Read command-line arguments
     let args: Vec<String> = env::args().collect();
 
     let mut line_num = 0;
-   
+
     // Check if the input file name is provided
     if args.len() < 2 {
         eprintln!("Please provide the input file name.");
@@ -725,24 +813,23 @@ fn main() {
     let input_path = Path::new(input_file);
     let extension = input_path.extension().and_then(|ext| ext.to_str());
 
-    
     if extension != Some("txt") && extension != Some("nc") {
         eprintln!("Invalid input file format. Please provide a .txt or .nc file.");
         process::exit(1);
     }
 
-    let command_result: Result<Command, Box<dyn std::error::Error>> = context.parse_command(&input_file);
+    let command_result: Result<Command, CommandError> = context.parse_command(input_file);
 
     match command_result {
         Ok(command) => {
-            if let Err(err) = context.execute_commands(Ok(command)) {
+            if let Err(err) = context.execute_commands(command_result) {
                 eprintln!("Error: {}", err);
-                // Handle the error as needed
             }
         }
         Err(err) => {
             let error_message = format!("Unknown command: {:?}", err);
-            let boxed_error: Box<dyn std::error::Error> = Box::new(CustomError(error_message));
+            let command_error = CommandError::UnknownCommand(error_message);
+            let boxed_error: Box<dyn std::error::Error> = Box::new(command_error.clone());
             eprintln!("Error: {}", boxed_error);
             // Handle the error as needed
         }
