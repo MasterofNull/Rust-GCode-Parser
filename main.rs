@@ -105,6 +105,12 @@ enum TrigonometricFunction {
     Bcd,
 }
 
+#[derive(Debug, Clone)]
+enum CommandError {
+    UnknownCommand(String),
+    // Add more specific error variants as needed
+}
+
 
 
 /*
@@ -151,6 +157,7 @@ struct ExecutionContext {
     // for accessing and updating variable values
     modal_state: ModalState,
     variables: Variables,
+    commands: Commands,
 }
 
 #[derive(Default)]
@@ -158,6 +165,7 @@ struct ModalState {
     // Add your state variables here
     feed_rate: f64,
     spindle_speed: f64,
+    feed_type: String,
     // Add more state variables as needed
 }
 
@@ -167,6 +175,11 @@ struct Variables {
     // Example: map of variable names to their values
     // Assuming variables are stored as key-value pairs of strings
     variables: HashMap<String, f64>,
+}
+
+#[derive(Default)]
+struct Commands {
+    commands: Vec<String>,
 }
 
 /*
@@ -182,11 +195,6 @@ struct Variables {
 //    fn evaluate_condition(&self, context: &ExecutionContext) -> f64;
 //}
 
-#[derive(Debug, Clone)]
-enum CommandError {
-    UnknownCommand(String),
-    // Add more specific error variants as needed
-}
 
 impl std::fmt::Display for CommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -255,6 +263,7 @@ impl ModalState {
         ModalState {
             feed_rate: 0.0,
             spindle_speed: 0.0,
+            feed_type: "G00",
             // Initialize more state variables here
         }
     }
@@ -373,59 +382,41 @@ impl ExecutionContext {
         value1 == value2
     }
 
-    fn execute_commands(&mut self, command: Result<Command, CommandError>) -> Result<(), CommandError> {
-        // Extract the lines of the command
-        let lines = match &command {
-            Ok(cmd) => cmd.to_string().lines().map(String::from).collect::<Vec<String>>(),
-            Err(err) => return Err(err.clone()),
-        };
-    
-        // Process each command line
-        for line in lines {
-            // Split the line into individual command tokens
-            let tokens: Vec<&str> = line.trim().split_whitespace().collect();
-    
-            // Check if the line is a variable assignment
-            if tokens.len() >= 3 && tokens[1] == "=" {
-                let variable = tokens[0];
-                let value: f64 = tokens[2].parse().unwrap();
-    
-                // Set the variable in the context's variables
-                self.variables.set_variable(variable.to_string(), value);
-            }
-    
-            // Get the command and its arguments
-            if let Some((outer_command, args)) = tokens.split_first() {
-                match outer_command {
-                    &"GCode" | &"MCode" | &"TCode" | &"FCode" | &"SCode" | &"IfStatement" | &"WhileLoop" => {
-                        let inner_lines: Vec<&str> = args.iter().flat_map(|&line| line.split('\n')).filter(|&line| !line.trim().is_empty()).collect();
-                        for &inner_line in &inner_lines {
-                            let trimmed_line = inner_line.trim();
-                            if trimmed_line.is_empty() {
+
+    fn execute_commands(command: Result<Command, CommandError>) -> Result<(), CommandError> {
+        match command {
+            Ok(cmd) => {
+                match cmd {
+                    Command::GCode(g) | Command::MCode(g) | Command::TCode(g) | Command::FCode(g) | Command::SCode(g) | Command::IfStatement(g) | Command::WhileLoop(g) => {
+                        let lines: Vec<&str> = g.lines().map(str::trim).collect();
+                        for line in lines {
+                            if line.is_empty() {
                                 continue;
                             }
     
-                            let parsed_command = self.parse_command(trimmed_line);
-                            self.execute_commands(parsed_command)?;
+                            let parsed_command = ExecutionContext::parsed_gcode(line)?;
+                            execute_commands(Ok(parsed_command))?;
                         }
                     }
-                    &"Unknown" => {
-                        return Err(CommandError::UnknownCommand(format!("{:?}", command)));
+                    Command::Unknown(_) => {
+                        return Err(CommandError::UnknownCommand(format!("{:?}", cmd)));
                     }
-                    &"PRINT" => {
+                    /*Command::PRINT => {
                         // Execute the PRINT command
                         if let Some((variable, _)) = args.split_first() {
                             if let Some(value) = self.variables.get_variable_value(variable) {
                                 println!("{} = {}", variable, value);
                             }
                         }
-                    }
-                    // Add more commands as needed
-                    _ => {
-                        return Err(CommandError::UnknownCommand(format!("{:?}", command)));
-                    }
+                    }*/
                 }
             }
+                    // Add more commands as needed
+                    Err(err) => {
+                        //return Err(CommandError::UnknownCommand(format!("{:?}", command)));
+                        return Err(err);
+                        
+                    }
         }
         // Return the executed command
         Ok(())
@@ -440,6 +431,7 @@ impl ExecutionContext {
         ExecutionContext {
             modal_state: ModalState::new(),
             variables: Variables::new(),
+            commands: Commands::default()
 
         }
     }
@@ -456,7 +448,7 @@ impl ExecutionContext {
         self.variables.variables.insert(variable_name.to_string(), value);
     }
 
-    fn parse_command(&mut self, line: &str) -> Result<Command, CommandError> {
+    /*fn parse_command(&mut self, line: &str) -> Result<Command, CommandError> {
         let tokens: Vec<&str> = line.split_whitespace().collect();
         
         let command = match tokens[0] {
@@ -470,7 +462,7 @@ impl ExecutionContext {
             _ => Command::Unknown(line.to_string()),
         };
         Ok(command)
-    }
+    }*/
 
     
         // Helper methods for handling each command type
@@ -624,91 +616,92 @@ impl ExecutionContext {
         }
     
     
-        pub fn gcode(&mut self, file_name: &str) -> Result<(), Box<dyn Error>> {
-            // Implement your gcode function logic here
-            // Use the provided file name to read and process the input file
+        pub fn parsed_gcode(value: &str) -> Result<(), CommandError> {
             let re_goto = Regex::new(r"GOTO N(\d+)").unwrap();
             let re_if_else = Regex::new(r"(IF|ELSE|ELSE IF) ([^[]+)\[(.+)\]").unwrap();
             let re_while_end = Regex::new(r"(WHILE|END)(\d+)").unwrap();
         
             let context = ExecutionContext::new();
         
-            // Read the file contents into a string
-            let file_contents = fs::read_to_string(file_name)?;
-        
-            let lines: Vec<&str> = file_contents.split('\n').collect();
+            let lines: Vec<&str> = value.lines().map(str::trim).collect();
         
             let mut line_num = 0;
             let mut loop_stack = Vec::new();
         
             while line_num < lines.len() {
-                let line = lines[line_num].trim();
+                let line = lines[line_num];
                 if line.is_empty() {
                     line_num += 1;
                     continue;
                 }
         
                 if let Some(caps) = re_goto.captures(line) {
-                    // Handle GOTO command
                     let target_line = caps[1].parse::<usize>().unwrap();
                     line_num = target_line;
                     continue;
                 }
         
-                // Parse the command using the parse_command function
-                let command = self.parse_command(line)?;
+                let command = match line.chars().next() {
+                    Some('G') => Command::GCode(line[1..].to_string()),
+                    Some('M') => Command::MCode(line[1..].to_string()),
+                    Some('T') => Command::TCode(line[1..].to_string()),
+                    Some('F') => Command::FCode(line[1..].to_string()),
+                    Some('S') => Command::SCode(line[1..].to_string()),
+                    Some('I') => Command::IfStatement(line.to_string()),
+                    Some('W') => Command::WhileLoop(line.to_string()),
+                    _ => Command::Unknown(line.to_string()),
+                };
         
-                // Process the parsed command
                 match command {
                     Command::GCode(g) => {
                         // Handle GCode command
                         match &g[..2] {
-                            "G0" => self.handle_g0_g00(&g[2..]),
-                            "G1" => self.handle_g1_g01(&g[2..]),
-                            "G2" => self.handle_g2_g02(&g[2..]),
-                            "G3" => self.handle_g3_g03(&g[2..]),
-                            "G4" => self.handle_g4_g04(&g[2..]),
-                            "G5" => self.handle_g5_g05(&g[2..]),
-                            "G6" => self.handle_g6_g06(&g[2..]),
-                            "G7" => self.handle_g7_g07(&g[2..]),
-                            "G8" => self.handle_g8_g08(&g[2..]),
-                            "G9" => self.handle_g9_g09(&g[2..]),
-                            "G10" => self.handle_g10(&g[3..]),
-                            _ => self.handle_other_gcode(&g),
+                            "0" => context.handle_g0_g00(&g[2..]),
+                            "1" => context.handle_g1_g01(&g[2..]),
+                            "2" => context.handle_g2_g02(&g[2..]),
+                            "3" => context.handle_g3_g03(&g[2..]),
+                            "4" => context.handle_g4_g04(&g[2..]),
+                            "5" => context.handle_g5_g05(&g[2..]),
+                            "6" => context.handle_g6_g06(&g[2..]),
+                            "7" => context.handle_g7_g07(&g[2..]),
+                            "8" => context.handle_g8_g08(&g[2..]),
+                            "9" => context.handle_g9_g09(&g[2..]),
+                            "10" => context.handle_g10(&g[3..]),
+                            _ => context.handle_other_gcode(&g),
                         }
                     }
                     Command::MCode(m) => {
                         // Handle MCode command
                         match &m[..2] {
-                            "M0" => self.handle_m0_m00(&m[2..]),
-                            "M1" => self.handle_m1_m01(&m[2..]),
-                            "M2" => self.handle_m2_m02(&m[2..]),
-                            "M3" => self.handle_m3_m03(&m[2..]),
-                            "M4" => self.handle_m4_m04(&m[2..]),
-                            "M5" => self.handle_m5_m05(&m[2..]),
-                            "M6" => self.handle_m6_m06(&m[2..]),
-                            "M7" => self.handle_m7_m07(&m[2..]),
-                            "M8" => self.handle_m8_m08(&m[2..]),
-                            "M9" => self.handle_m9_m09(&m[2..]),
-                            "M10" => self.handle_m10(&m[3..]),
-                            _ => self.handle_other_mcode(&m),
+                            "0" => context.handle_m0_m00(&m[2..]),
+                            "1" => context.handle_m1_m01(&m[2..]),
+                            "2" => context.handle_m2_m02(&m[2..]),
+                            "3" => context.handle_m3_m03(&m[2..]),
+                            "4" => context.handle_m4_m04(&m[2..]),
+                            "5" => context.handle_m5_m05(&m[2..]),
+                            "6" => context.handle_m6_m06(&m[2..]),
+                            "7" => context.handle_m7_m07(&m[2..]),
+                            "8" => context.handle_m8_m08(&m[2..]),
+                            "9" => context.handle_m9_m09(&m[2..]),
+                            "10" => context.handle_m10(&m[3..]),
+                            _ => context.handle_other_mcode(&m),
                         }
                     }
                     Command::TCode(t) => {
                         // Handle TCode command
-                        self.handle_tcode(&t);
+                        context.handle_tcode(&t);
                     }
                     Command::FCode(f) => {
                         // Handle FCode command
-                        self.handle_fcode(&f);
+                        context.handle_fcode(&f);
                     }
                     Command::SCode(s) => {
                         // Handle SCode command
-                        self.handle_scode(&s);
+                        context.handle_scode(&s);
                     }
                     Command::Unknown(_) => {
                         // Handle default command
-                        self.handle_unknown_command();
+                        context.handle_unknown_command();
                     }
                     Command::IfStatement(_) => {
                         // Handle IF statement
@@ -807,6 +800,7 @@ impl ExecutionContext {
         }
         
         
+        
     
 }
 
@@ -849,19 +843,8 @@ fn main() {
     // Read the file contents into a string
     let file_contents = fs::read_to_string(input_file).unwrap();
 
-    // Process the file contents line by line
-    for line in file_contents.lines() {
-        if let Some(parsed_command) = context.parse_command(line.trim()) {
-            let gcode_command = context.gcode(parsed_command.0, parsed_command.1);
-            if let Err(err) = context.execute_commands(&gcode_command) {
-                eprintln!("Error: {}", err);
-            }
-        } else {
-            let error_message = format!("Unknown command: {:?}", line);
-            let command_error = CommandError::UnknownCommand(error_message);
-            let boxed_error: Box<dyn std::error::Error> = Box::new(command_error.clone());
-            eprintln!("Error: {}", boxed_error);
-            // Handle the error as needed
-        }
+    // Call the gcode function to process the file contents
+    if let Err(err) = ExecutionContext::parsed_gcode(&file_contents) {
+        eprintln!("Error: {}", err);
     }
 }
