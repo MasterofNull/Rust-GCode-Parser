@@ -37,18 +37,12 @@
 use regex::Regex;
 use std::collections::HashMap;
 use std::fmt;
-use std::str::FromStr;
-use std::default;
 use std::env;
-use std::error::Error;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process;
-use nom::error::context;
-//use crate::command::{Command, CommandError};
-//use crate::execution_context::ExecutionContext;
-//use core::num::dec2flt::number::Number;
+//use nom::error::context;
+
 
 /*
 ==================================================================================================================================
@@ -74,7 +68,7 @@ use nom::error::context;
  enum Expression {
      Constant(f64),
      Variable(String),
-     BinaryOperation(Box<Expression>, BinaryOperation, Box<Expression>),
+     BinaryOperation(Box<Expression>, BinaryOperator, Box<Expression>),
      TrigonometricOperation(Box<Expression>, TrigonometricOperation),
  }
  
@@ -175,6 +169,8 @@ struct Variables {
     // Example: map of variable names to their values
     // Assuming variables are stored as key-value pairs of strings
     variables: HashMap<String, f64>,
+    var1: HashMap<String, f64>,
+    var2: HashMap<String, f64>,
 }
 
 #[derive(Default)]
@@ -189,12 +185,6 @@ struct Commands {
         ///            Interpret and Parse Command Line                ///
 ==================================================================================================================================
 */
-
-// Define the Expression trait
-//trait Expression {
-//    fn evaluate_condition(&self, context: &ExecutionContext) -> f64;
-//}
-
 
 impl std::fmt::Display for CommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -289,6 +279,13 @@ impl Variables {
         Variables {
             variables: HashMap::new(),
         }
+        let mut variables = Variables {
+            var1: HashMap::new(),
+            var2: HashMap::new(),
+        };
+        
+        variables.var1.insert(String::from("default_var1"), 0.0);
+        variables.var2.insert(String::from("default_var2"), 0.0);
     }
 
 
@@ -312,12 +309,12 @@ impl ExecutionContext {
         match expression {
             Expression::Constant(value) => *value,
             Expression::Variable(name) => {
-                self.variables.get_variable_value(name).unwrap_or(0.0)
+                *self.get_variable_value(name).unwrap_or(&0.0)
             }
             Expression::BinaryOperation(left, operator, right) => {
                 let left_value = self.evaluate(left);
                 let right_value = self.evaluate(right);
-                match operator.operator {
+                match operator {
                     BinaryOperator::Add => left_value + right_value,
                     BinaryOperator::Subtract => left_value - right_value,
                     BinaryOperator::Multiply => left_value * right_value,
@@ -363,7 +360,7 @@ impl ExecutionContext {
         let variable2 = parts[1];
     
         // Assuming both variables are strings
-        let value1 = match self.variables.get_variable_value(variable1) {
+        let value1 = match self.get_variable_value(variable1) {
             Some(val) => val,
             None => {
                 eprintln!("Variable not found: {}", variable1);
@@ -371,7 +368,7 @@ impl ExecutionContext {
             }
         };
     
-        let value2 = match self.variables.get_variable_value(variable2) {
+        let value2 = match self.get_variable_value(variable2) {
             Some(val) => val,
             None => {
                 eprintln!("Variable not found: {}", variable2);
@@ -413,15 +410,14 @@ impl ExecutionContext {
         }
     }
     
-    
-    
-    
-    
-    
-    
-
-    
     fn new() -> Self {
+        let mut variables = Variables {
+            var1: HashMap::new(),
+            var2: HashMap::new(),
+        };
+        
+        variables.var1.insert(String::from("default_var1"), 0.0);
+        variables.var2.insert(String::from("default_var2"), 0.0);
         // Implement the initialization of the execution context
         // with default values for variables
         ExecutionContext {
@@ -432,7 +428,7 @@ impl ExecutionContext {
         }
     }
 
-    fn get_variable(&self, variable_name: &str) -> Option<&f64> {
+    fn get_variable_value(&self, variable_name: &str) -> Option<&f64> {
         // Implement the method to retrieve the value of a variable
         // from the execution context
         self.variables.variables.get(variable_name)
@@ -444,373 +440,412 @@ impl ExecutionContext {
         self.variables.variables.insert(variable_name.to_string(), value);
     }
 
-    /*fn parse_command(&mut self, line: &str) -> Result<Command, CommandError> {
-        let tokens: Vec<&str> = line.split_whitespace().collect();
+/*
+==================================================================================================================================
+            ///                                            ///                   
+           ///               Code Handlers                ///
+          ///                                            ///
+==================================================================================================================================
+*/
+
+    
+// Helper methods for handling each command type
+    fn handle_g0_g00(&mut self, g: &str) {
+        // Process the coordinates...
+        println!("Interpreting G0 or G00 command: {:?}", g);
+    }
+    
+    fn handle_g1_g01(&mut self, coordinates: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", coordinates);
+    }
         
-        let command = match tokens[0] {
-            "G" => Command::GCode(line.to_string()),
-            "M" => Command::MCode(line.to_string()),
-            "T" => Command::TCode(line.to_string()),
-            "F" => Command::FCode(line.to_string()),
-            "S" => Command::SCode(line.to_string()),
-            "IF" => Command::IfStatement(line.to_string()),
-            "WHILE" => Command::WhileLoop(line.to_string()),
-            _ => Command::Unknown(line.to_string()),
-        };
-        Ok(command)
-    }*/
+    fn handle_g2_g02(&mut self, coordinates: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", coordinates);
+    }
 
+    fn handle_g3_g03(&mut self, coordinates: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", coordinates);
+    }
+
+    fn handle_g4_g04(&mut self, coordinates: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", coordinates);
+    }
+
+    fn handle_g5_g05(&mut self, coordinates: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", coordinates);
+    }
+
+    fn handle_g6_g06(&mut self, coordinates: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", coordinates);
+    }
+
+    fn handle_g7_g07(&mut self, coordinates: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", coordinates);
+    }
+
+    fn handle_g8_g08(&mut self, coordinates: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", coordinates);
+    }
+
+    fn handle_g9_g09(&mut self, coordinates: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", coordinates);
+    }
+
+    fn handle_g10(&mut self, coordinates: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", coordinates);
+    }
+
+    // Implement other GCode handler methods...
     
-        // Helper methods for handling each command type
-        fn handle_g0_g00(&mut self, coordinates: &str) {
-            // Process the coordinates...
-            println!("Interpreting G0 or G00 command: {:?}", coordinates);
-        }
+    fn handle_other_gcode(&self, g: &str) {
+        println!("Interpreting GCode command: {:?}", g);
+    }
     
-        fn handle_g1_g01(&mut self, coordinates: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", coordinates);
-        }
+    // Implement other MCode handler methods...
+    
+    fn handle_m0_m00(&mut self, m: &str) {
+        // Process the coordinates...
+        println!("Interpreting G0 or G00 command: {:?}", m);
+    }
+    
+    fn handle_m1_m01(&mut self, m: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", m);
+    }
         
-        fn handle_g2_g02(&mut self, coordinates: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", coordinates);
-        }
+    fn handle_m2_m02(&mut self, m: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", m);
+    }
 
-        fn handle_g3_g03(&mut self, coordinates: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", coordinates);
-        }
+    fn handle_m3_m03(&mut self, m: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", m);
+    }
 
-        fn handle_g4_g04(&mut self, coordinates: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", coordinates);
-        }
+    fn handle_m4_m04(&mut self, m: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", m);
+    }
 
-        fn handle_g5_g05(&mut self, coordinates: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", coordinates);
-        }
+    fn handle_m5_m05(&mut self, m: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", m);
+    }
 
-        fn handle_g6_g06(&mut self, coordinates: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", coordinates);
-        }
+    fn handle_m6_m06(&mut self, m: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", m);
+    }
 
-        fn handle_g7_g07(&mut self, coordinates: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", coordinates);
-        }
+    fn handle_m7_m07(&mut self, m: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", m);
+    }
 
-        fn handle_g8_g08(&mut self, coordinates: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", coordinates);
-        }
+    fn handle_m8_m08(&mut self, m: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", m);
+    }
 
-        fn handle_g9_g09(&mut self, coordinates: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", coordinates);
-        }
+    fn handle_m9_m09(&mut self, m: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", m);
+    }
 
-        fn handle_g10(&mut self, coordinates: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", coordinates);
-        }
-
-        // Implement other GCode handler methods...
-    
-        fn handle_other_gcode(&self, g: &str) {
-            println!("Interpreting GCode command: {:?}", g);
-        }
-    
-        // Implement other MCode handler methods...
-    
-        fn handle_m0_m00(&mut self, m: &str) {
-            // Process the coordinates...
-            println!("Interpreting G0 or G00 command: {:?}", m);
-        }
-    
-        fn handle_m1_m01(&mut self, m: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", m);
-        }
-        
-        fn handle_m2_m02(&mut self, m: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", m);
-        }
-
-        fn handle_m3_m03(&mut self, m: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", m);
-        }
-
-        fn handle_m4_m04(&mut self, m: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", m);
-        }
-
-        fn handle_m5_m05(&mut self, m: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", m);
-        }
-
-        fn handle_m6_m06(&mut self, m: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", m);
-        }
-
-        fn handle_m7_m07(&mut self, m: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", m);
-        }
-
-        fn handle_m8_m08(&mut self, m: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", m);
-        }
-
-        fn handle_m9_m09(&mut self, m: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", m);
-        }
-
-        fn handle_m10(&mut self, m: &str) {
-            // Process the coordinates...
-            println!("Interpreting G1 or G01 command: {:?}", m);
-        }
+    fn handle_m10(&mut self, m: &str) {
+        // Process the coordinates...
+        println!("Interpreting G1 or G01 command: {:?}", m);
+    }
 
         
-        fn handle_other_mcode(&self, m: &str) {
-            println!("Interpreting MCode command: {:?}", m);
+    fn handle_other_mcode(&self, m: &str) {
+        println!("Interpreting MCode command: {:?}", m);
+    }
+    
+    // Implement other command handler methods...
+    
+    fn handle_tcode(&self, t: &str) {
+        println!("Interpreting TCode command: {:?}", t);
+    }
+    
+    fn handle_fcode(&self, f: &str) {
+        println!("Interpreting FCode command: {:?}", f);
+    }
+    
+    fn handle_scode(&self, s: &str) {
+        println!("Interpreting SCode command: {:?}", s);
+    }
+    
+    fn handle_if_statement(
+        &mut self,
+        statement_type: &str,
+        context: ExecutionContext,
+        line_num: usize,
+        loop_stack: Vec<usize>,
+        condition: &str
+    ) {
+        // Evaluate the condition and execute the corresponding commands
+        let condition_result = context.evaluate_condition(condition);
+        if condition_result {
+            let mut new_line_num = line_num;
+            new_line_num += 1;
+            line_num = new_line_num;
+            return;
         }
+        println!("Interpreting IfStatement: {:?}", statement_type);
+    }
     
-        // Implement other command handler methods...
-    
-        fn handle_tcode(&self, t: &str) {
-            println!("Interpreting TCode command: {:?}", t);
+    fn handle_else_if_statement(
+        &mut self,
+        statement_type: &str,
+        context: ExecutionContext,
+        line_num: usize,
+        loop_stack: Vec<usize>,
+        condition: &str
+    ) {
+        // Evaluate the condition and execute the corresponding commands if the previous conditions were false
+        let condition_result = Self::evaluate_condition(&context, condition);
+        if condition_result && loop_stack.is_empty() {
+            let mut new_line_num = line_num;
+            new_line_num += 1;
+            line_num = new_line_num;
+            return;
         }
+        println!("Interpreting IfElseStatement: {:?}", statement_type);
+    }
     
-        fn handle_fcode(&self, f: &str) {
-            println!("Interpreting FCode command: {:?}", f);
-        }
-    
-        fn handle_scode(&self, s: &str) {
-            println!("Interpreting SCode command: {:?}", s);
-        }
-    
-        fn handle_if_statement(&self, if_statement: IfStatement) {
-            println!("Interpreting IfStatement: {:?}", if_statement);
-        }
-    
-        fn handle_while_loop(&self, while_loop: WhileLoop) {
-            println!("Interpreting WhileLoop: {:?}", while_loop);
-        }
-    
-        fn handle_unknown_command(&self) {
-            println!("Interpreting Unknown command");
-        }
-    
-    
-        pub fn parsed_gcode(value: &str) -> Result<Command, CommandError> {
-            let re_goto = Regex::new(r"GOTO N(\d+)").unwrap();
-            let re_if_else = Regex::new(r"(IF|ELSE|ELSE IF) ([^[]+)\[(.+)\]").unwrap();
-            let re_while_end = Regex::new(r"(WHILE|END)(\d+)").unwrap();
-        
-            let mut context = ExecutionContext::new();
-        
-            let lines: Vec<&str> = value.lines().map(str::trim).collect();
-        
-            let mut line_num = 0;
-            let mut loop_stack = Vec::new();
-            let mut result_command = Command::Unknown(String::from(value));
-        
-            while line_num < lines.len() {
-                let line = lines[line_num];
-                if line.is_empty() {
-                    line_num += 1;
-                    continue;
-                }
-        
-                if let Some(caps) = re_goto.captures(line) {
-                    let target_line = caps[1].parse::<usize>().unwrap();
-                    line_num = target_line;
-                    continue;
-                }
-        
-                let command = match line.chars().next() {
-                    Some('G') => Command::GCode(line[1..].to_string()),
-                    Some('M') => Command::MCode(line[1..].to_string()),
-                    Some('T') => Command::TCode(line[1..].to_string()),
-                    Some('F') => Command::FCode(line[1..].to_string()),
-                    Some('S') => Command::SCode(line[1..].to_string()),
-                    Some('I') => Command::IfStatement(line.to_string()),
-                    Some('W') => Command::WhileLoop(line.to_string()),
-                    _ => Command::Unknown(line.to_string()),
-                };
-        
-                match command {
-                    Command::GCode(g) => {
-                        // Handle GCode command
-                        match &g[..2] {
-                            "0" => context.handle_g0_g00(&g[2..]),
-                            "1" => context.handle_g1_g01(&g[2..]),
-                            "2" => context.handle_g2_g02(&g[2..]),
-                            "3" => context.handle_g3_g03(&g[2..]),
-                            "4" => context.handle_g4_g04(&g[2..]),
-                            "5" => context.handle_g5_g05(&g[2..]),
-                            "6" => context.handle_g6_g06(&g[2..]),
-                            "7" => context.handle_g7_g07(&g[2..]),
-                            "8" => context.handle_g8_g08(&g[2..]),
-                            "9" => context.handle_g9_g09(&g[2..]),
-                            "10" => context.handle_g10(&g[3..]),
-                            _ => context.handle_other_gcode(&g),
-                        }
-                        result_command = Command::GCode(g.clone());
-                        break;
-                    }
-                    Command::MCode(m) => {
-                        // Handle MCode command
-                        match &m[..2] {
-                            "0" => context.handle_m0_m00(&m[2..]),
-                            "1" => context.handle_m1_m01(&m[2..]),
-                            "2" => context.handle_m2_m02(&m[2..]),
-                            "3" => context.handle_m3_m03(&m[2..]),
-                            "4" => context.handle_m4_m04(&m[2..]),
-                            "5" => context.handle_m5_m05(&m[2..]),
-                            "6" => context.handle_m6_m06(&m[2..]),
-                            "7" => context.handle_m7_m07(&m[2..]),
-                            "8" => context.handle_m8_m08(&m[2..]),
-                            "9" => context.handle_m9_m09(&m[2..]),
-                            "10" => context.handle_m10(&m[3..]),
-                            _ => context.handle_other_mcode(&m),
-                        }
-                        result_command = Command::MCode(m.clone());
-                        break;
-                    }
-                    Command::TCode(t) => {
-                        // Handle TCode command
-                        context.handle_tcode(&t);
-                    }
-                    Command::FCode(f) => {
-                        // Handle FCode command
-                        context.handle_fcode(&f);
-                    }
-                    Command::SCode(s) => {
-                        // Handle SCode command
-                        context.handle_scode(&s);
-                    }
-                    Command::Unknown(_) => {
-                        // Handle default command
-                        context.handle_unknown_command();
-                    }
-                    Command::IfStatement(_) => {
-                        // Handle IF statement
-                        if let Some(caps) = re_if_else.captures(line) {
-                            // Handle IF/ELSE/ELSE IF statements
-                            let statement_type = &caps[1];
-                            let condition = &caps[2];
-        
-                            match statement_type {
-                                "IF" => {
-                                    // Evaluate the condition and execute the corresponding commands
-                                    let condition_result = Self::evaluate_condition(&context, condition);
-                                    if condition_result {
-                                        let mut new_line_num = line_num;
-                                        new_line_num += 1;
-                                        line_num = new_line_num;
-                                        continue;
-                                    }
-                                }
-                                "ELSE IF" => {
-                                    // Evaluate the condition and execute the corresponding commands if the previous conditions were false
-                                    let condition_result = Self::evaluate_condition(&context, condition);
-                                    if condition_result && loop_stack.is_empty() {
-                                        let mut new_line_num = line_num;
-                                        new_line_num += 1;
-                                        line_num = new_line_num;
-                                        continue;
-                                    }
-                                }
-                                "ELSE" => {
-                                    // Execute the corresponding commands if the previous conditions were false
-                                    if loop_stack.is_empty() {
-                                        let mut new_line_num = line_num;
-                                        new_line_num += 1;
-                                        line_num = new_line_num;
-                                        if loop_stack.is_empty() {
-                                            // Put your code here
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    Command::WhileLoop(_) => {
-                        // Handle WHILE loop
-                        if let Some(caps) = re_while_end.captures(line) {
-                            // Handle WHILE/END statements
-                            let statement_type = &caps[1];
-                            let loop_id = caps[2].parse::<usize>().unwrap();
-        
-                            match statement_type {
-                                "WHILE" => {
-                                    // Evaluate the condition and push the loop onto the stack if it's true
-                                    let condition = lines[line_num + 1].trim_start_matches("IF").trim();
-                                    let condition_result = Self::evaluate_condition(&context, condition);
-                                    if condition_result {
-                                        loop_stack.push(loop_id);
-                                        continue;
-                                    } else {
-                                        // Skip lines until the corresponding END statement
-                                        let mut nested_end_count = 0;
-                                        while line_num < lines.len() - 1 {
-                                            line_num += 1;
-                                            if lines[line_num].trim() == format!("END{}", loop_id) {
-                                                if nested_end_count == 0 {
-                                                    break;
-                                                } else {
-                                                    nested_end_count -= 1;
-                                                }
-                                            } else if re_while_end.is_match(lines[line_num].trim()) {
-                                                nested_end_count += 1;
-                                            }
-                                        }
-                                    }
-                                }
-                                "END" => {
-                                    // Pop the loop from the stack if its corresponding END statement is reached
-                                    if let Some(last_loop) = loop_stack.pop() {
-                                        if last_loop != loop_id {
-                                            panic!("Mismatched loop statements");
-                                        }
-                                    } else {
-                                        panic!("Unexpected END statement");
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-        
-                line_num += 1;
+    fn handle_else_statement(
+        &mut self,
+        statement_type: &str,
+        context: ExecutionContext,
+        line_num: usize,
+        loop_stack: Vec<usize>,
+        condition: &str
+    ) {
+        // Execute the corresponding commands if the previous conditions were false              
+        if loop_stack.is_empty() {
+            let mut new_line_num = line_num;
+            new_line_num += 1;
+            line_num = new_line_num;
+            if loop_stack.is_empty() {
+                // Put your code here
             }
-        
-            Ok(result_command)
         }
-        
-        
-        
-        
-        
-        
+        println!("Interpreting ElseStatement: {:?}", statement_type);
+    }
+    
+    fn handle_while_loop(
+        &self,
+        context: ExecutionContext,
+        line_num: usize,
+        loop_stack: Vec<usize>,
+        statement_type: &str,
+        loop_id: usize
+    ) {
+        // Evaluate the condition and push the loop onto the stack if it's true
+        let condition = lines[line_num + 1].trim_start_matches("IF").trim();
+        let condition_result = Self::evaluate_condition(&context, condition);
+        if condition_result {
+            loop_stack.push(loop_id);
+            return;
+        } else {
+            // Skip lines until the corresponding END statement
+            let mut nested_end_count = 0;
+            while line_num < lines.len() - 1 {
+                line_num += 1;
+                if lines[line_num].trim() == format!("END{}", loop_id) {
+                    if nested_end_count == 0 {
+                        break;
+                    } else {
+                        nested_end_count -= 1;
+                    }
+                } else if re_while_end.is_match(lines[line_num].trim()) {
+                    nested_end_count += 1;
+                }
+            }
+        }
+        println!("Interpreting WhileLoop: {:?}", statement_type);
+    }
+    
+    fn handle_while_loop_end(
+        &self,
+        context: ExecutionContext,
+        line_num: usize,
+        loop_stack: Vec<usize>,
+        statement_type: &str,
+        loop_id: usize
+    ) {
+        // Pop the loop from the stack if its corresponding END statement is reached
+        if let Some(last_loop) = loop_stack.pop() {
+            if last_loop != loop_id {
+                panic!("Mismatched loop statements");
+            }
+        } else {
+            panic!("Unexpected END statement");
+        }
+        let mut new_line_num = line_num;
+        new_line_num += 1;
+        line_num = new_line_num;
+        println!("Interpreting WhileLoopEnd: {:?}", statement_type);
+    }
+
+    fn handle_unknown_command(&self) {
+        println!("Interpreting Unknown command");
+    }
+    
+
+/*
+==================================================================================================================================
+          ///                    Implaments                              ///
+         ///                         to                                 ///
+        ///            Interpret and Parse Command Line                ///
+==================================================================================================================================
+*/
+
+    pub fn parsed_gcode(value: &str) -> Result<Command, CommandError> {
+        let re_goto = Regex::new(r"GOTO N(\d+)").unwrap();
+        let re_if_else = Regex::new(r"(IF|ELSE IF) ([^[]+)\[(.+)\]").unwrap();
+        let re_while_end = Regex::new(r"(WHILE|END)(\d+)").unwrap();
+
+        let mut context = ExecutionContext::new();
+
+        let lines: Vec<&str> = value.lines().map(str::trim).collect();
+
+        let mut line_num = 0;
+        let mut loop_stack: Vec<usize> = Vec::new();
+        let mut result_command = Command::Unknown(String::from(value));
+
+        while line_num < lines.len() {
+            let line = lines[line_num];
+            if line.is_empty() {
+                line_num += 1;
+                continue;
+            }
+
+            if let Some(caps) = re_goto.captures(line) {
+                let target_line = caps[1].parse::<usize>().unwrap();
+                line_num = target_line;
+                continue;
+            }
+
+            let command = match line.chars().next() {
+                Some('G') => Command::GCode(line[1..].to_string()),
+                Some('M') => Command::MCode(line[1..].to_string()),
+                Some('T') => Command::TCode(line[1..].to_string()),
+                Some('F') => Command::FCode(line[1..].to_string()),
+                Some('S') => Command::SCode(line[1..].to_string()),
+                Some('I') => Command::IfStatement(line.to_string()),
+                Some('W') => Command::WhileLoop(line.to_string()),
+                _ => Command::Unknown(line.to_string()),
+            };
+
+            match command {
+                Command::GCode(g) => {
+                    // Handle GCode command
+                    match &g[..2] {
+                        "0" => context.handle_g0_g00(&g[2..]),
+                        "1" => context.handle_g1_g01(&g[2..]),
+                        "2" => context.handle_g2_g02(&g[2..]),
+                        "3" => context.handle_g3_g03(&g[2..]),
+                        "4" => context.handle_g4_g04(&g[2..]),
+                        "5" => context.handle_g5_g05(&g[2..]),
+                        "6" => context.handle_g6_g06(&g[2..]),
+                        "7" => context.handle_g7_g07(&g[2..]),
+                        "8" => context.handle_g8_g08(&g[2..]),
+                        "9" => context.handle_g9_g09(&g[2..]),
+                        "10" => context.handle_g10(&g[3..]),
+                        _ => context.handle_other_gcode(&g),
+                    }
+                    result_command = Command::GCode(g.clone());
+                    break;
+                }
+                Command::MCode(m) => {
+                    // Handle MCode command
+                    match &m[..2] {
+                        "0" => context.handle_m0_m00(&m[2..]),
+                        "1" => context.handle_m1_m01(&m[2..]),
+                        "2" => context.handle_m2_m02(&m[2..]),
+                        "3" => context.handle_m3_m03(&m[2..]),
+                        "4" => context.handle_m4_m04(&m[2..]),
+                        "5" => context.handle_m5_m05(&m[2..]),
+                        "6" => context.handle_m6_m06(&m[2..]),
+                        "7" => context.handle_m7_m07(&m[2..]),
+                        "8" => context.handle_m8_m08(&m[2..]),
+                        "9" => context.handle_m9_m09(&m[2..]),
+                        "10" => context.handle_m10(&m[3..]),
+                        _ => context.handle_other_mcode(&m),
+                    }
+                    result_command = Command::MCode(m.clone());
+                    break;
+                }
+                Command::TCode(t) => {
+                    // Handle TCode command
+                    context.handle_tcode(&t);
+                }
+                Command::FCode(f) => {
+                    // Handle FCode command
+                    context.handle_fcode(&f);
+                }
+                Command::SCode(s) => {
+                    // Handle SCode command
+                    context.handle_scode(&s);
+                }
+                Command::Unknown(_) => {
+                    // Handle default command
+                    context.handle_unknown_command();
+                }
+                Command::IfStatement(if_statement) => {
+                    // Handle IF statement
+                    if let Some(caps) = re_if_else.captures(line) {
+                        // Handle IF/ELSE/ELSE IF statements
+                        let statement_type = &caps[1];
+                        let condition = &caps[2];
+                        match statement_type {
+                            "IF" => context.handle_if_statement(statement_type, context, line_num, loop_stack, condition),
+                            "ELSE IF" => context.handle_else_if_statement(statement_type, context, line_num, loop_stack, condition),    
+                            "ELSE" => context.handle_else_statement(statement_type, context, line_num, loop_stack, condition),
+                            _ => context.handle_unknown_command(),
+                        }
+                    }
+                    result_command = Command::IfStatement(if_statement.clone());
+                    break;
+                }
+                Command::WhileLoop(while_loop) => {
+                    // Handle WHILE loop
+                    if let Some(caps) = re_while_end.captures(line) {
+                        // Handle WHILE/END statements
+                        let statement_type = &caps[1];
+                        let loop_id = caps[2].parse::<usize>().unwrap();
+
+                        match statement_type {
+                            "WHILE" => context.handle_while_loop(context, line_num, loop_stack, statement_type, loop_id),
+                            "END" => context.handle_while_loop_end(context, line_num, loop_stack, statement_type, loop_id),   
+                            _ => context.handle_unknown_command(),
+                        }
+                    }
+                    result_command = Command::WhileLoop(while_loop.clone());
+                    break;
+                }
+            }
+
+            line_num += 1;
+        }
+
+        Ok(result_command)
+    }
     
 }
-
-
-
 
 
 /*
