@@ -58,7 +58,7 @@ use nom::error::context;
 ==================================================================================================================================
 */
  
- #[derive(Debug)]
+ #[derive(Debug, Clone)]
  enum Command {
      GCode(String),
      MCode(String),
@@ -263,7 +263,7 @@ impl ModalState {
         ModalState {
             feed_rate: 0.0,
             spindle_speed: 0.0,
-            feed_type: "G00",
+            feed_type: "G00".to_string(),
             // Initialize more state variables here
         }
     }
@@ -383,44 +383,40 @@ impl ExecutionContext {
     }
 
 
-    fn execute_commands(command: Result<Command, CommandError>) -> Result<(), CommandError> {
+    fn execute_commands(&mut self, command: Result<Command, CommandError>) -> Result<Command, CommandError> {
         match command {
             Ok(cmd) => {
+                let cloned_cmd = cmd.clone(); // Clone a reference to cmd
+    
                 match cmd {
                     Command::GCode(g) | Command::MCode(g) | Command::TCode(g) | Command::FCode(g) | Command::SCode(g) | Command::IfStatement(g) | Command::WhileLoop(g) => {
                         let lines: Vec<&str> = g.lines().map(str::trim).collect();
+                        let mut last_executed_cmd = cloned_cmd;
+    
                         for line in lines {
                             if line.is_empty() {
                                 continue;
                             }
     
                             let parsed_command = ExecutionContext::parsed_gcode(line)?;
-                            execute_commands(Ok(parsed_command))?;
+                            last_executed_cmd = self.execute_commands(Ok(parsed_command))?;
                         }
+    
+                        Ok(last_executed_cmd)
                     }
                     Command::Unknown(_) => {
-                        return Err(CommandError::UnknownCommand(format!("{:?}", cmd)));
+                        Err(CommandError::UnknownCommand(format!("{:?}", cloned_cmd)))
                     }
-                    /*Command::PRINT => {
-                        // Execute the PRINT command
-                        if let Some((variable, _)) = args.split_first() {
-                            if let Some(value) = self.variables.get_variable_value(variable) {
-                                println!("{} = {}", variable, value);
-                            }
-                        }
-                    }*/
                 }
             }
-                    // Add more commands as needed
-                    Err(err) => {
-                        //return Err(CommandError::UnknownCommand(format!("{:?}", command)));
-                        return Err(err);
-                        
-                    }
+            Err(err) => Err(err),
         }
-        // Return the executed command
-        Ok(())
     }
+    
+    
+    
+    
+    
     
     
 
@@ -616,17 +612,18 @@ impl ExecutionContext {
         }
     
     
-        pub fn parsed_gcode(value: &str) -> Result<(), CommandError> {
+        pub fn parsed_gcode(value: &str) -> Result<Command, CommandError> {
             let re_goto = Regex::new(r"GOTO N(\d+)").unwrap();
             let re_if_else = Regex::new(r"(IF|ELSE|ELSE IF) ([^[]+)\[(.+)\]").unwrap();
             let re_while_end = Regex::new(r"(WHILE|END)(\d+)").unwrap();
         
-            let context = ExecutionContext::new();
+            let mut context = ExecutionContext::new();
         
             let lines: Vec<&str> = value.lines().map(str::trim).collect();
         
             let mut line_num = 0;
             let mut loop_stack = Vec::new();
+            let mut result_command = Command::Unknown(String::from(value));
         
             while line_num < lines.len() {
                 let line = lines[line_num];
@@ -669,6 +666,8 @@ impl ExecutionContext {
                             "10" => context.handle_g10(&g[3..]),
                             _ => context.handle_other_gcode(&g),
                         }
+                        result_command = Command::GCode(g.clone());
+                        break;
                     }
                     Command::MCode(m) => {
                         // Handle MCode command
@@ -686,6 +685,8 @@ impl ExecutionContext {
                             "10" => context.handle_m10(&m[3..]),
                             _ => context.handle_other_mcode(&m),
                         }
+                        result_command = Command::MCode(m.clone());
+                        break;
                     }
                     Command::TCode(t) => {
                         // Handle TCode command
@@ -760,6 +761,7 @@ impl ExecutionContext {
                                     let condition_result = Self::evaluate_condition(&context, condition);
                                     if condition_result {
                                         loop_stack.push(loop_id);
+                                        continue;
                                     } else {
                                         // Skip lines until the corresponding END statement
                                         let mut nested_end_count = 0;
@@ -796,8 +798,11 @@ impl ExecutionContext {
                 line_num += 1;
             }
         
-            Ok(())
+            Ok(result_command)
         }
+        
+        
+        
         
         
         
