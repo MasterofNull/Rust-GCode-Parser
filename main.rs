@@ -278,14 +278,11 @@ impl Variables {
         // Initialize the variable storage
         Variables {
             variables: HashMap::new(),
-        }
-        let mut variables = Variables {
             var1: HashMap::new(),
             var2: HashMap::new(),
-        };
+        }
         
-        variables.var1.insert(String::from("default_var1"), 0.0);
-        variables.var2.insert(String::from("default_var2"), 0.0);
+        
     }
 
 
@@ -349,15 +346,27 @@ impl ExecutionContext {
         // Implement the evaluation of conditions based on the G-code specification
         // and the context (variable values) available in the `context` parameter
         // Return true if the condition is true, otherwise false
-        // Assume that the condition is a simple equality check between two variables
-        let parts: Vec<&str> = condition.split('=').map(|s| s.trim()).collect();
-        if parts.len() < 2 {
-            eprintln!("Invalid condition format: {}", condition);
-            return false;
-        }
+        // Assume that the condition is a simple comparison between two variables
     
-        let variable1 = parts[0];
-        let variable2 = parts[1];
+        let operators = ["==", "!=", ">", "<", ">=", "<="];
+    
+        let mut operator = "";
+        let mut variable1 = "";
+        let mut variable2 = "";
+    
+        for op in operators.iter() {
+            if condition.contains(op) {
+                operator = op;
+                let parts: Vec<&str> = condition.split(op).map(|s| s.trim()).collect();
+                if parts.len() < 2 {
+                    eprintln!("Invalid condition format: {}", condition);
+                    return false;
+                }
+                variable1 = parts[0];
+                variable2 = parts[1];
+                break;
+            }
+        }
     
         // Assuming both variables are strings
         let value1 = match self.get_variable_value(variable1) {
@@ -376,8 +385,20 @@ impl ExecutionContext {
             }
         };
     
-        value1 == value2
+        match operator {
+            "==" => value1 == value2,
+            "!=" => value1 != value2,
+            ">" => value1 > value2,
+            "<" => value1 < value2,
+            ">=" => value1 >= value2,
+            "<=" => value1 <= value2,
+            _ => {
+                eprintln!("Invalid operator: {}", operator);
+                false
+            }
+        }
     }
+    
 
 
     fn execute_commands(&mut self, command: Result<Command, CommandError>) -> Result<Command, CommandError> {
@@ -412,6 +433,7 @@ impl ExecutionContext {
     
     fn new() -> Self {
         let mut variables = Variables {
+            variables: HashMap::new(),
             var1: HashMap::new(),
             var2: HashMap::new(),
         };
@@ -590,13 +612,13 @@ impl ExecutionContext {
     fn handle_if_statement(
         &mut self,
         statement_type: &str,
-        context: ExecutionContext,
-        line_num: usize,
-        loop_stack: Vec<usize>,
+        mut line_num: usize,
+        mut loop_stack: Vec<usize>,
         condition: &str
     ) {
         // Evaluate the condition and execute the corresponding commands
-        let condition_result = context.evaluate_condition(condition);
+        let context = &mut ExecutionContext::new();
+        let condition_result = self.evaluate_condition(condition);
         if condition_result {
             let mut new_line_num = line_num;
             new_line_num += 1;
@@ -609,12 +631,12 @@ impl ExecutionContext {
     fn handle_else_if_statement(
         &mut self,
         statement_type: &str,
-        context: ExecutionContext,
-        line_num: usize,
-        loop_stack: Vec<usize>,
+        mut line_num: usize,
+        mut loop_stack: Vec<usize>,
         condition: &str
     ) {
         // Evaluate the condition and execute the corresponding commands if the previous conditions were false
+        let context = &mut ExecutionContext::new();
         let condition_result = Self::evaluate_condition(&context, condition);
         if condition_result && loop_stack.is_empty() {
             let mut new_line_num = line_num;
@@ -628,9 +650,8 @@ impl ExecutionContext {
     fn handle_else_statement(
         &mut self,
         statement_type: &str,
-        context: ExecutionContext,
-        line_num: usize,
-        loop_stack: Vec<usize>,
+        mut line_num: usize,
+        mut loop_stack: Vec<usize>,
         condition: &str
     ) {
         // Execute the corresponding commands if the previous conditions were false              
@@ -647,15 +668,17 @@ impl ExecutionContext {
     
     fn handle_while_loop(
         &self,
-        context: ExecutionContext,
-        line_num: usize,
-        loop_stack: Vec<usize>,
+        re_while_end: Regex,
+        mut line_num: usize,
+        mut loop_stack: Vec<usize>,
         statement_type: &str,
-        loop_id: usize
+        loop_id: usize,
+        lines: Vec<&str>,
     ) {
         // Evaluate the condition and push the loop onto the stack if it's true
+        let context = &mut ExecutionContext::new();
         let condition = lines[line_num + 1].trim_start_matches("IF").trim();
-        let condition_result = Self::evaluate_condition(&context, condition);
+        let condition_result = context.evaluate_condition(condition);
         if condition_result {
             loop_stack.push(loop_id);
             return;
@@ -680,9 +703,8 @@ impl ExecutionContext {
     
     fn handle_while_loop_end(
         &self,
-        context: ExecutionContext,
-        line_num: usize,
-        loop_stack: Vec<usize>,
+        mut line_num: usize,
+        mut loop_stack: Vec<usize>,
         statement_type: &str,
         loop_id: usize
     ) {
@@ -718,12 +740,12 @@ impl ExecutionContext {
         let re_if_else = Regex::new(r"(IF|ELSE IF) ([^[]+)\[(.+)\]").unwrap();
         let re_while_end = Regex::new(r"(WHILE|END)(\d+)").unwrap();
 
-        let mut context = ExecutionContext::new();
+        let context = &mut ExecutionContext::new();
 
         let lines: Vec<&str> = value.lines().map(str::trim).collect();
 
         let mut line_num = 0;
-        let mut loop_stack: Vec<usize> = Vec::new();
+        let loop_stack: Vec<usize> = Vec::new();
         let mut result_command = Command::Unknown(String::from(value));
 
         while line_num < lines.len() {
@@ -812,9 +834,9 @@ impl ExecutionContext {
                         let statement_type = &caps[1];
                         let condition = &caps[2];
                         match statement_type {
-                            "IF" => context.handle_if_statement(statement_type, context, line_num, loop_stack, condition),
-                            "ELSE IF" => context.handle_else_if_statement(statement_type, context, line_num, loop_stack, condition),    
-                            "ELSE" => context.handle_else_statement(statement_type, context, line_num, loop_stack, condition),
+                            "IF" => context.handle_if_statement(statement_type, line_num, loop_stack, condition),
+                            "ELSE IF" => context.handle_else_if_statement(statement_type, line_num, loop_stack, condition),    
+                            "ELSE" => context.handle_else_statement(statement_type, line_num, loop_stack, condition),
                             _ => context.handle_unknown_command(),
                         }
                     }
@@ -829,8 +851,8 @@ impl ExecutionContext {
                         let loop_id = caps[2].parse::<usize>().unwrap();
 
                         match statement_type {
-                            "WHILE" => context.handle_while_loop(context, line_num, loop_stack, statement_type, loop_id),
-                            "END" => context.handle_while_loop_end(context, line_num, loop_stack, statement_type, loop_id),   
+                            "WHILE" => context.handle_while_loop(re_while_end, line_num, loop_stack, statement_type, loop_id, lines),
+                            "END" => context.handle_while_loop_end(line_num, loop_stack, statement_type, loop_id),   
                             _ => context.handle_unknown_command(),
                         }
                     }
@@ -857,7 +879,6 @@ impl ExecutionContext {
 */
 
 fn main() {
-    let mut context = ExecutionContext::default();
 
     // Read command-line arguments
     let args: Vec<String> = env::args().collect();
